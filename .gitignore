@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.log
+*.xlsx
+*.csv
+*.json
+emails/
+emails_archive/
+outputs/
+_bot_processed_message_ids.json

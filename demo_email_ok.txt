@@ -1,0 +1,13 @@
+De: maria.garcia@example.com
+Para: viajes@eventos-demo.com
+Asunto: Viaje simposio Madrid
+
+Hola,
+
+Soy Maria Garcia Fernandez, DNI 23456789D. Asistire al simposio de oncologia en Madrid.
+
+Necesito viajar desde Malaga a Madrid el 18/09/2026. Me vendria bien salir por la tarde, idealmente entre las 16:00 y las 18:00. Prefiero tren si hay opcion directa.
+
+Mi telefono es 622334455.
+
+Gracias.
