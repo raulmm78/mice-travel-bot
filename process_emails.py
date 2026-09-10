@@ -35,12 +35,8 @@ BASE_DIR = Path(__file__).resolve().parent
 EMAIL_DIR = BASE_DIR / "emails"
 ASSETS_DIR = BASE_DIR / "assets"
 ENV_PATH = BASE_DIR / ".env"
-OUTPUT_DIR = BASE_DIR.parents[1] / "outputs"
-XLSX_PATH = OUTPUT_DIR / "viajes_demo.xlsx"
-CSV_PATH = OUTPUT_DIR / "viajes_demo.csv"
-JSON_PATH = OUTPUT_DIR / "viajes_demo.json"
-LOG_PATH = OUTPUT_DIR / "email_agent.log"
-EVENT_OUTPUT_DIR = OUTPUT_DIR / "eventos"
+DEFAULT_OUTPUT_DIR = BASE_DIR.parents[1] / "outputs"
+DEFAULT_EVENT_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "eventos"
 PROCESSED_IDS_FILENAME = "_bot_processed_message_ids.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 WATCH_INTERVAL_SECONDS = int(os.getenv("WATCH_INTERVAL_SECONDS", "300"))
@@ -768,7 +764,32 @@ def apply_nn_row_banding(sheet, max_col: int, first_row: int, last_row: int) -> 
 
 def event_output_root() -> Path:
     configured = os.getenv("EVENT_OUTPUT_DIR", "").strip()
-    return Path(configured) if configured else EVENT_OUTPUT_DIR
+    return Path(configured) if configured else output_dir() / "eventos"
+
+
+def output_dir() -> Path:
+    configured = os.getenv("OUTPUT_DIR", "").strip()
+    return Path(configured) if configured else DEFAULT_OUTPUT_DIR
+
+
+def xlsx_path() -> Path:
+    configured = os.getenv("XLSX_PATH", "").strip()
+    return Path(configured) if configured else output_dir() / "viajes_demo.xlsx"
+
+
+def csv_path() -> Path:
+    configured = os.getenv("CSV_PATH", "").strip()
+    return Path(configured) if configured else output_dir() / "viajes_demo.csv"
+
+
+def json_path() -> Path:
+    configured = os.getenv("JSON_PATH", "").strip()
+    return Path(configured) if configured else output_dir() / "viajes_demo.json"
+
+
+def log_path() -> Path:
+    configured = os.getenv("LOG_PATH", "").strip()
+    return Path(configured) if configured else output_dir() / "email_agent.log"
 
 
 def processed_ids_path() -> Path:
@@ -776,7 +797,7 @@ def processed_ids_path() -> Path:
     if configured:
         return Path(configured)
     configured_event_root = os.getenv("EVENT_OUTPUT_DIR", "").strip()
-    root = Path(configured_event_root) if configured_event_root else OUTPUT_DIR
+    root = Path(configured_event_root) if configured_event_root else output_dir()
     return root / PROCESSED_IDS_FILENAME
 
 
@@ -815,7 +836,7 @@ def mark_processed_message_ids(rows: list[TravelRequest]) -> None:
 
 
 def clear_local_event_outputs(event_root: Path) -> None:
-    if event_root.resolve() != EVENT_OUTPUT_DIR.resolve() or not event_root.exists():
+    if event_root.resolve() != DEFAULT_EVENT_OUTPUT_DIR.resolve() or not event_root.exists():
         return
     for path in event_root.glob("*.xlsx"):
         path.unlink()
@@ -834,11 +855,12 @@ def apply_bot_added_font(sheet, row_num: int, max_col: int, has_dietary_restrict
     )
 
 
-def write_nn_excel(rows: list[TravelRequest], output_path: Path = XLSX_PATH, title: str | None = None) -> bool:
+def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, title: str | None = None) -> bool:
     template = nn_template_path()
     if not template:
         return False
 
+    output_path = output_path or xlsx_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook = load_workbook(template)
     sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
@@ -944,19 +966,19 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path = XLSX_PATH, tit
 
 
 def write_outputs(rows: list[TravelRequest]) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir().mkdir(parents=True, exist_ok=True)
     data = [{field: asdict(row).get(field, "") for field in OUTPUT_FIELDS} for row in rows]
 
-    with JSON_PATH.open("w", encoding="utf-8") as f:
+    with json_path().open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     headers = OUTPUT_FIELDS
-    with CSV_PATH.open("w", encoding="utf-8", newline="") as f:
+    with csv_path().open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         writer.writerows(data)
 
-    if write_nn_excel(rows, XLSX_PATH, "LISTADO GLOBAL"):
+    if write_nn_excel(rows, xlsx_path(), "LISTADO GLOBAL"):
         by_event: dict[str, list[TravelRequest]] = {}
         for row in rows:
             event_name = row.evento.strip() or "SIN EVENTO"
@@ -995,7 +1017,7 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         sheet.column_dimensions[letter].width = min(max(max_len + 2, 12), 42)
 
     sheet.freeze_panes = "A2"
-    workbook.save(XLSX_PATH)
+    workbook.save(xlsx_path())
 
 
 def next_email_id() -> int:
@@ -1146,16 +1168,16 @@ def mail_env(name: str, default: str = "") -> str:
 
 
 def log_event(message: str) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir().mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with LOG_PATH.open("a", encoding="utf-8") as f:
+    with log_path().open("a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {message}\n")
 
 
 def recent_logs(limit: int = 80) -> list[str]:
-    if not LOG_PATH.exists():
+    if not log_path().exists():
         return []
-    return LOG_PATH.read_text(encoding="utf-8").splitlines()[-limit:]
+    return log_path().read_text(encoding="utf-8").splitlines()[-limit:]
 
 
 def require_mail_config() -> None:
@@ -1216,7 +1238,7 @@ def imap_is_ok() -> bool:
 
 
 def excel_is_ready() -> bool:
-    return bool(nn_template_path() or XLSX_PATH.exists())
+    return bool(nn_template_path() or xlsx_path().exists())
 
 
 def run_bot_once() -> tuple[int, list[Path], list[TravelRequest]]:
@@ -1438,30 +1460,30 @@ def process_paths(paths: list[Path], use_openai: bool | None = None) -> list[Tra
     mark_processed_message_ids(rows)
     print(f"Procesados: {len(rows)} emails")
     print(f"Extractor: {'OpenAI API' if use_openai else 'fallback local'}")
-    print(f"Excel: {XLSX_PATH}")
+    print(f"Excel: {xlsx_path()}")
     print(f"Excel eventos: {event_output_root()}")
-    print(f"CSV: {CSV_PATH}")
-    print(f"JSON: {JSON_PATH}")
+    print(f"CSV: {csv_path()}")
+    print(f"JSON: {json_path()}")
     log_event(f"Excel global y listados por evento actualizados con {len(rows)} solicitudes")
     return rows
 
 
 def open_excel_file() -> None:
-    if not XLSX_PATH.exists():
+    if not xlsx_path().exists():
         process_all()
     if sys.platform == "darwin":
-        subprocess.run(["open", str(XLSX_PATH)], check=False)
+        subprocess.run(["open", str(xlsx_path())], check=False)
     elif sys.platform.startswith("win"):
-        os.startfile(str(XLSX_PATH))  # type: ignore[attr-defined]
+        os.startfile(str(xlsx_path()))  # type: ignore[attr-defined]
     else:
-        subprocess.run(["xdg-open", str(XLSX_PATH)], check=False)
+        subprocess.run(["xdg-open", str(xlsx_path())], check=False)
     log_event("Excel abierto desde el panel")
 
 
 def rows_as_dicts() -> list[dict[str, str]]:
-    if not JSON_PATH.exists():
+    if not json_path().exists():
         process_all()
-    with JSON_PATH.open("r", encoding="utf-8") as f:
+    with json_path().open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -1890,10 +1912,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_bytes(dashboard_html().encode("utf-8"), "text/html; charset=utf-8")
             return
         if self.path == "/download/xlsx":
-            self.send_bytes(XLSX_PATH.read_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_bytes(xlsx_path().read_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             return
         if self.path == "/download/json":
-            self.send_bytes(JSON_PATH.read_bytes(), "application/json; charset=utf-8")
+            self.send_bytes(json_path().read_bytes(), "application/json; charset=utf-8")
             return
         if self.path == "/assets/logo-micetravel-blanco.png":
             self.send_bytes((ASSETS_DIR / "logo-micetravel-blanco.png").read_bytes(), "image/png")
@@ -1957,7 +1979,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/open-excel":
             open_excel_file()
-            self.send_json({"opened": str(XLSX_PATH)})
+            self.send_json({"opened": str(xlsx_path())})
             return
         self.send_json({"error": "not_found"}, status=404)
 

@@ -55,6 +55,7 @@ OPENAI_MODEL=gpt-4.1-mini
 EMAIL_AGENT_PORT=8765
 AUTO_UPDATE_ENABLED=1
 AUTO_UPDATE_BRANCH=main
+OUTPUT_DIR=/ruta/a/OneDrive/EMPRESAS/Novo Nordisk/_global
 NN_TEMPLATE_PATH=/ruta/a/LISTADO PARA VOLCAR LOS DATOS NN.xlsx
 EVENT_OUTPUT_DIR=/ruta/a/OneDrive/EMPRESAS/Novo Nordisk
 PROCESSED_IDS_PATH=/ruta/a/OneDrive/EMPRESAS/Novo Nordisk/_bot_processed_message_ids.json
@@ -75,6 +76,15 @@ NO ENVIAR ---- CONGRESO IMS 28-09-26.xlsx
 
 El bot guarda los identificadores reales de los emails procesados en `_bot_processed_message_ids.json`. Si varios equipos comparten la misma carpeta de OneDrive, todos pueden consultar el mismo registro para reducir duplicados.
 
+En Windows, las rutas del `.env` pueden ser normales de OneDrive. Ejemplo:
+
+```text
+OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_global
+EVENT_OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk
+PROCESSED_IDS_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_bot_processed_message_ids.json
+NN_TEMPLATE_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\Plantillas\LISTADO PARA VOLCAR LOS DATOS NN.xlsx
+```
+
 Después ejecuta el script normalmente:
 
 ```bash
@@ -93,6 +103,34 @@ Variables opcionales:
 AUTO_UPDATE_ENABLED=1
 AUTO_UPDATE_BRANCH=main
 ```
+
+## Instalacion en Windows
+
+El cliente no necesita ChatGPT ni Codex instalado. Necesita:
+
+- Python 3.
+- Git, si quieres que se actualice automaticamente desde GitHub.
+- OneDrive instalado y sincronizado.
+- El archivo `.env` configurado en cada ordenador.
+
+Instalacion recomendada desde GitHub:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+iwr -UseB https://raw.githubusercontent.com/raulmm78/mice-travel-bot/main/instalar_desde_github_windows.ps1 -OutFile "$env:TEMP\instalar_mice_travel_bot.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\instalar_mice_travel_bot.ps1"
+```
+
+Instalacion manual si ya tienes la carpeta descargada:
+
+1. Descargar o clonar el proyecto desde GitHub.
+2. Ejecutar `instalar_windows.bat`.
+3. Editar `.env` con correo, OpenAI, plantilla y rutas OneDrive.
+4. Abrir `abrir_panel_windows.bat`.
+
+Para parar el panel: `cerrar_panel_windows.bat`.
+
+Para varios ordenadores, lo recomendable en primera version es que solo uno tenga el bot en `ON`. Los demas pueden abrir el Excel desde OneDrive.
 
 También puedes seguir usando variable de entorno si lo prefieres:
 
