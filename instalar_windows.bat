@@ -25,7 +25,7 @@ if not %errorlevel%==0 (
     echo https://www.python.org/downloads/windows/
     echo.
     echo Importante: durante la instalacion marca "Add python.exe to PATH".
-    pause
+    if not defined CI pause
     exit /b 1
   )
   winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
@@ -40,7 +40,7 @@ if not %errorlevel%==0 (
     echo.
     echo Python se ha instalado, pero Windows aun no lo encuentra en esta ventana.
     echo Cierra esta ventana y vuelve a ejecutar instalar_windows.bat.
-    pause
+    if not defined CI pause
     exit /b 1
   )
 )
@@ -81,4 +81,4 @@ echo.
 echo Siguiente paso:
 echo 1. Edita el archivo .env con las claves y rutas de OneDrive.
 echo 2. Abre "MICE Travel Bot" desde el escritorio.
-pause
+if not defined CI pause

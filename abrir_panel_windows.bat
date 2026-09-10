@@ -32,5 +32,5 @@ for /l %%I in (1,1,30) do (
 
 echo No se pudo abrir el panel.
 echo Revisa el log: %LOG_FILE%
-pause
+if not defined CI pause
 exit /b 1

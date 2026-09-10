@@ -1,0 +1,89 @@
+name: Windows smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Create test env
+        shell: pwsh
+        run: |
+          @"
+          OPENAI_API_KEY=
+          OPENAI_MODEL=gpt-4.1-mini
+          EMAIL_AGENT_PORT=8765
+          AUTO_UPDATE_ENABLED=0
+          OUTPUT_DIR=$env:RUNNER_TEMP\mice-output
+          EVENT_OUTPUT_DIR=$env:RUNNER_TEMP\mice-output\eventos
+          PROCESSED_IDS_PATH=$env:RUNNER_TEMP\mice-output\_bot_processed_message_ids.json
+          WATCH_INTERVAL_SECONDS=300
+          IMAP_HOST=
+          IMAP_PORT=993
+          IMAP_USER=
+          IMAP_PASSWORD=
+          IMAP_FOLDER=INBOX
+          SMTP_HOST=
+          SMTP_PORT=587
+          SMTP_USER=
+          SMTP_PASSWORD=
+          MAIL_FROM=
+          MAIL_TO=
+          ALERT_EMAIL_TO=
+          "@ | Set-Content -Path ".env" -Encoding UTF8
+
+      - name: Compile Python
+        run: python -m py_compile process_emails.py update_before_start.py
+
+      - name: Run local processing smoke test
+        shell: pwsh
+        run: |
+          python process_emails.py
+          if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.xlsx")) { throw "No se genero el Excel global" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.csv")) { throw "No se genero el CSV" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.json")) { throw "No se genero el JSON" }
+
+      - name: Run installer smoke test
+        shell: cmd
+        env:
+          CI: "1"
+        run: instalar_windows.bat
+
+      - name: Run dashboard smoke test
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "python" -ArgumentList "-u", "process_emails.py", "--dashboard" -PassThru -WindowStyle Hidden
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 "http://127.0.0.1:8765/"
+                if ($response.StatusCode -eq 200 -and $response.Content.Contains("MICE Travel Bot")) {
+                  $ok = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $ok) { throw "El panel no responde en Windows" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }

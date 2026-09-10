@@ -8,4 +8,4 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8768"') do taskkill /PID %%
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8769"') do taskkill /PID %%P /F >nul 2>nul
 
 echo MICE Travel Bot detenido.
-pause
+if not defined CI pause
