@@ -67,6 +67,12 @@ jobs:
           CI: "1"
         run: instalar_windows.bat
 
+      - name: Run diagnostic smoke test
+        shell: cmd
+        env:
+          CI: "1"
+        run: diagnostico_windows.bat
+
       - name: Run dashboard smoke test
         shell: pwsh
         run: |

@@ -25,10 +25,12 @@ function New-Shortcut {
 
 $openBot = Join-Path $baseDir "abrir_panel_windows.bat"
 $closeBot = Join-Path $baseDir "cerrar_panel_windows.bat"
+$diagnostic = Join-Path $baseDir "diagnostico_windows.bat"
 $envFile = Join-Path $baseDir ".env"
 
 New-Shortcut -Name "MICE Travel Bot" -Target $openBot
 New-Shortcut -Name "Cerrar MICE Travel Bot" -Target $closeBot
+New-Shortcut -Name "Diagnostico MICE Travel Bot" -Target $diagnostic
 New-Shortcut -Name "Configurar MICE Travel Bot" -Target "notepad.exe" -Arguments "`"$envFile`""
 
 Write-Host "Accesos directos creados en el escritorio."

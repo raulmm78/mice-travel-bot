@@ -18,6 +18,7 @@
 6. Configurar `.env`.
 7. Ejecutar `abrir_panel_windows.bat`.
 8. Comprobar luces verdes de IMAP y Excel.
+9. Ejecutar `diagnostico_windows.bat` antes de hacer la prueba real.
 
 ## Variables minimas de `.env`
 
@@ -55,6 +56,19 @@ WATCH_INTERVAL_SECONDS=300
 7. Verificar que crea el Excel por evento con formato `NO ENVIAR ---- NOMBRECONGRESO FECHAINICIOCONGRESO.xlsx`.
 8. Verificar que el segundo ordenador ve los cambios por OneDrive.
 9. Editar manualmente alguna fila y comprobar si OneDrive genera conflicto.
+
+## Prueba de Excel abierto
+
+1. PC 1: dejar el bot en `OFF`.
+2. PC 1 y PC 2: abrir el mismo Excel de evento desde OneDrive.
+3. PC 2: escribir algo manual en una celda libre y guardar.
+4. Confirmar que PC 1 ve el cambio sincronizado.
+5. Enviar un correo nuevo de ese mismo evento.
+6. PC 1: poner el bot en `ON`.
+7. Comprobar una de estas salidas:
+   - si el Excel se actualiza en ambos PCs, OneDrive permite el flujo local;
+   - si Excel bloquea el archivo, debe llegar un email de aviso de error;
+   - si OneDrive crea una copia en conflicto, hay que pasar a Microsoft 365/SharePoint API.
 
 ## Criterio para produccion
 

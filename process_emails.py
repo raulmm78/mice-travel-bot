@@ -826,6 +826,20 @@ def save_processed_message_ids(message_ids: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def save_workbook_safely(workbook: Workbook, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_name(f".{output_path.stem}.tmp-{os.getpid()}.xlsx")
+    try:
+        workbook.save(temp_path)
+        os.replace(temp_path, output_path)
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
 def mark_processed_message_ids(rows: list[TravelRequest]) -> None:
     message_ids = load_processed_message_ids()
     for row in rows:
@@ -961,7 +975,7 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         for date_column in ("X", "AF", "AG"):
             sheet[f"{date_column}{index}"].number_format = EXCEL_DATE_FORMAT
 
-    workbook.save(output_path)
+    save_workbook_safely(workbook, output_path)
     return True
 
 
@@ -1017,7 +1031,7 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         sheet.column_dimensions[letter].width = min(max(max_len + 2, 12), 42)
 
     sheet.freeze_panes = "A2"
-    workbook.save(xlsx_path())
+    save_workbook_safely(workbook, xlsx_path())
 
 
 def next_email_id() -> int:
@@ -2034,8 +2048,70 @@ def watch_emails() -> None:
         print("\nEscucha detenida.")
 
 
+def check_path_writable(path: Path, *, is_dir: bool = False) -> tuple[bool, str]:
+    target_dir = path if is_dir else path.parent
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        test_file = target_dir / f".mice_write_test_{os.getpid()}.tmp"
+        test_file.write_text("ok", encoding="utf-8")
+        test_file.unlink()
+        return True, str(target_dir)
+    except Exception as exc:
+        return False, str(exc)
+
+
+def diagnostic_line(label: str, ok: bool, detail: str = "") -> bool:
+    icon = "OK" if ok else "ERROR"
+    print(f"[{icon}] {label}" + (f": {detail}" if detail else ""))
+    return ok
+
+
+def diagnose_environment() -> int:
+    print("Diagnostico MICE Travel Bot")
+    print("===========================")
+    print()
+
+    checks: list[bool] = []
+    checks.append(diagnostic_line("Python", True, sys.version.split()[0]))
+    checks.append(diagnostic_line("OpenAI API key configurada", bool(mail_env("OPENAI_API_KEY"))))
+
+    imap_configured = bool(mail_env("IMAP_USER") and mail_env("IMAP_PASSWORD"))
+    checks.append(diagnostic_line("Configuracion IMAP", imap_configured))
+    if imap_configured:
+        try:
+            unread = check_unread_mail()
+            checks.append(diagnostic_line("Conexion IMAP", True, f"{unread} correos no leidos NUEVA SOLICITUD"))
+        except Exception as exc:
+            checks.append(diagnostic_line("Conexion IMAP", False, str(exc)))
+
+    template = nn_template_path()
+    checks.append(diagnostic_line("Plantilla Excel", bool(template), str(template or "no encontrada")))
+
+    output_ok, output_detail = check_path_writable(output_dir(), is_dir=True)
+    checks.append(diagnostic_line("Carpeta global escribible", output_ok, output_detail))
+
+    event_ok, event_detail = check_path_writable(event_output_root(), is_dir=True)
+    checks.append(diagnostic_line("Carpeta eventos escribible", event_ok, event_detail))
+
+    ids_ok, ids_detail = check_path_writable(processed_ids_path())
+    checks.append(diagnostic_line("Registro anti-duplicados escribible", ids_ok, ids_detail))
+
+    smtp_configured = bool(mail_env("SMTP_USER") and mail_env("SMTP_PASSWORD") and (mail_env("ALERT_EMAIL_TO") or mail_env("MAIL_TO")))
+    checks.append(diagnostic_line("Avisos por email configurados", smtp_configured))
+
+    print()
+    if all(checks):
+        print("Resultado: listo para probar.")
+        return 0
+    print("Resultado: hay puntos que revisar antes de entregar.")
+    return 1
+
+
 def main() -> None:
     load_env_file()
+
+    if "--diagnose" in sys.argv or "--diagnostico" in sys.argv:
+        raise SystemExit(diagnose_environment())
 
     if "--dashboard" in sys.argv or "--serve" in sys.argv:
         serve_dashboard()

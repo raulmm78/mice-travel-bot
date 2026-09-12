@@ -62,6 +62,23 @@ Al arrancar:
 3. Abre el panel local.
 4. No reinicia el PC.
 
+Antes de la primera prueba, usar el acceso directo:
+
+```text
+Diagnostico MICE Travel Bot
+```
+
+Debe mostrar OK en:
+
+- Python.
+- OpenAI API key.
+- Configuracion IMAP.
+- Conexion IMAP.
+- Plantilla Excel.
+- Carpeta global escribible.
+- Carpeta eventos escribible.
+- Registro anti-duplicados escribible.
+
 ## Recomendacion para varios ordenadores
 
 Primera version:
