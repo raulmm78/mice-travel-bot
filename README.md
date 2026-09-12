@@ -31,7 +31,7 @@ Si falta alguno, si el DNI tiene formato dudoso o si la fecha no está normaliza
 Ejecuta:
 
 ```bash
-cd /Users/raulmartinez/Documents/Codex/2026-07-27/si/work/email-agent-demo
+cd /Users/raulmartinez/Desktop/MICE Travel Bot
 python3 process_emails.py
 ```
 
@@ -152,7 +152,7 @@ abrir_panel_mac.command
 O abrirlo desde terminal:
 
 ```bash
-cd /Users/raulmartinez/Documents/Codex/2026-07-27/si/work/email-agent-demo
+cd /Users/raulmartinez/Desktop/MICE Travel Bot
 python3 process_emails.py --dashboard
 ```
 
@@ -226,7 +226,7 @@ Si el bot encuentra un problema leyendo el correo, procesando los datos o escrib
 También puedes enseñar que el sistema reacciona cuando "llega" un email nuevo usando el modo escucha:
 
 ```bash
-cd /Users/raulmartinez/Documents/Codex/2026-07-27/si/work/email-agent-demo
+cd /Users/raulmartinez/Desktop/MICE Travel Bot
 python3 process_emails.py --watch
 ```
 
