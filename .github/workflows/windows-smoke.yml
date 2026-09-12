@@ -71,7 +71,7 @@ jobs:
         shell: cmd
         env:
           CI: "1"
-        run: diagnostico_windows.bat || exit /b 0
+        run: call diagnostico_windows.bat || exit /b 0
 
       - name: Run dashboard smoke test
         shell: pwsh
