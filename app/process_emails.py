@@ -1007,12 +1007,12 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         writer.writeheader()
         writer.writerows(data)
 
-    if write_nn_excel(rows, xlsx_path(), "LISTADO GLOBAL"):
-        by_event: dict[str, list[TravelRequest]] = {}
-        for row in rows:
-            event_name = row.evento.strip() or "SIN EVENTO"
-            by_event.setdefault(event_name, []).append(row)
+    by_event: dict[str, list[TravelRequest]] = {}
+    for row in rows:
+        event_name = row.evento.strip() or "SIN EVENTO"
+        by_event.setdefault(event_name, []).append(row)
 
+    if write_nn_excel(rows, xlsx_path(), "LISTADO GLOBAL"):
         event_root = event_output_root()
         clear_local_event_outputs(event_root)
         for event_name, event_rows in by_event.items():
@@ -1020,13 +1020,25 @@ def write_outputs(rows: list[TravelRequest]) -> None:
             write_nn_excel(event_rows, event_path, event_name)
         return
 
+    write_basic_excel(rows, xlsx_path(), "LISTADO GLOBAL")
+    event_root = event_output_root()
+    clear_local_event_outputs(event_root)
+    for event_name, event_rows in by_event.items():
+        event_path = event_root / event_workbook_filename(event_name, event_rows)
+        write_basic_excel(event_rows, event_path, event_name)
+
+
+def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) -> None:
+    headers = OUTPUT_FIELDS
+    data = [{field: asdict(row).get(field, "") for field in headers} for row in rows]
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Viajes"
+    sheet.title = "Totales"
+    sheet.append([title])
     sheet.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E78")
-    for cell in sheet[1]:
+    for cell in sheet[2]:
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
 
@@ -1034,7 +1046,7 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         sheet.append([item[header] for header in headers])
 
     status_col = headers.index("estado") + 1
-    for row in range(2, sheet.max_row + 1):
+    for row in range(3, sheet.max_row + 1):
         status = sheet.cell(row=row, column=status_col).value
         fill = PatternFill("solid", fgColor="C6EFCE" if status == "ok" else "FFEB9C")
         for col in range(1, sheet.max_column + 1):
@@ -1045,8 +1057,8 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         max_len = max(len(str(sheet.cell(row=row, column=col).value or "")) for row in range(1, sheet.max_row + 1))
         sheet.column_dimensions[letter].width = min(max(max_len + 2, 12), 42)
 
-    sheet.freeze_panes = "A2"
-    save_workbook_safely(workbook, xlsx_path())
+    sheet.freeze_panes = "A3"
+    save_workbook_safely(workbook, output_path)
 
 
 def next_email_id() -> int:
