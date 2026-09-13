@@ -8,18 +8,21 @@ if %errorlevel%==0 (
 ) else (
   set "PY=python"
 )
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 
 set "PORT=8765"
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-  if /i "%%A"=="EMAIL_AGENT_PORT" set "PORT=%%B"
+if exist "config\.env" (
+  for /f "usebackq tokens=1,* delims==" %%A in ("config\.env") do (
+    if /i "%%A"=="EMAIL_AGENT_PORT" set "PORT=%%B"
+  )
 )
 
 set "LOG_FILE=%TEMP%\mice_travel_bot_app.log"
 
 echo Buscando actualizaciones y arrancando MICE Travel Bot...
-%PY% -u update_before_start.py > "%LOG_FILE%" 2>&1
+%PY% -u app\update_before_start.py > "%LOG_FILE%" 2>&1
 
-start "MICE Travel Bot" /min "%~dp0run_panel_windows.bat"
+start "MICE Travel Bot" /min "%~dp0app\run_panel_windows.bat"
 
 for /l %%I in (1,1,30) do (
   powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 http://127.0.0.1:%PORT%/; exit 0 } catch { exit 1 }" >nul 2>nul

@@ -22,7 +22,7 @@ El cliente no necesita ChatGPT ni Codex.
 
 ## Configuracion
 
-Abrir el acceso directo `Configurar MICE Travel Bot` y rellenar `.env`.
+Abrir el acceso directo `Configurar MICE Travel Bot` y rellenar `config/.env`.
 
 Minimo:
 

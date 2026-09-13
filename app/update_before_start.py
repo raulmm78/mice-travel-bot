@@ -6,11 +6,14 @@ import sys
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = APP_DIR.parent
 
 
 def env_value(name: str, default: str = "") -> str:
-    env_path = BASE_DIR / ".env"
+    env_path = PROJECT_DIR / "config" / ".env"
+    if not env_path.exists():
+        env_path = PROJECT_DIR / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
             clean = line.strip()
@@ -24,7 +27,7 @@ def env_value(name: str, default: str = "") -> str:
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(BASE_DIR), *args],
+        ["git", "-C", str(PROJECT_DIR), *args],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -38,7 +41,7 @@ def main() -> int:
         print("Autoactualizacion desactivada.")
         return 0
 
-    if not (BASE_DIR / ".git").exists():
+    if not (PROJECT_DIR / ".git").exists():
         print("Autoactualizacion omitida: esta carpeta aun no es un repositorio Git.")
         return 0
 

@@ -22,11 +22,12 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r app/requirements.txt
 
       - name: Create test env
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path "config" | Out-Null
           @"
           OPENAI_API_KEY=
           OPENAI_MODEL=gpt-4.1-mini
@@ -48,15 +49,15 @@ jobs:
           MAIL_FROM=
           MAIL_TO=
           ALERT_EMAIL_TO=
-          "@ | Set-Content -Path ".env" -Encoding UTF8
+          "@ | Set-Content -Path "config\.env" -Encoding UTF8
 
       - name: Compile Python
-        run: python -m py_compile process_emails.py update_before_start.py
+        run: python -m py_compile app/process_emails.py app/update_before_start.py
 
       - name: Run local processing smoke test
         shell: pwsh
         run: |
-          python process_emails.py
+          python app/process_emails.py
           if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.xlsx")) { throw "No se genero el Excel global" }
           if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.csv")) { throw "No se genero el CSV" }
           if (-not (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.json")) { throw "No se genero el JSON" }
@@ -76,7 +77,7 @@ jobs:
       - name: Run dashboard smoke test
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "python" -ArgumentList "-u", "process_emails.py", "--dashboard" -PassThru -WindowStyle Hidden
+          $proc = Start-Process -FilePath "python" -ArgumentList "-u", "app/process_emails.py", "--dashboard" -PassThru -WindowStyle Hidden
           try {
             $ok = $false
             for ($i = 0; $i -lt 30; $i++) {

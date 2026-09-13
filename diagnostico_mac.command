@@ -4,5 +4,6 @@ PYTHON_BIN="python3"
 if [ -x ".venv/bin/python" ]; then
   PYTHON_BIN=".venv/bin/python"
 fi
-"$PYTHON_BIN" app/update_before_start.py
-"$PYTHON_BIN" app/process_emails.py --dashboard
+"$PYTHON_BIN" app/process_emails.py --diagnostico
+echo
+echo "Puedes cerrar esta ventana."

@@ -57,4 +57,4 @@ Write-Host "Ejecutando instalador local..."
 & (Join-Path $installDir "instalar_windows.bat")
 
 Write-Host ""
-Write-Host "Listo. Revisa el archivo .env antes de arrancar el bot."
+Write-Host "Listo. Revisa el archivo config/.env antes de arrancar el bot."

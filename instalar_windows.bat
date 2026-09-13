@@ -58,27 +58,30 @@ if not %errorlevel%==0 (
 )
 
 echo Instalando dependencias...
+%PY% -m venv .venv
+set "PY=.venv\Scripts\python.exe"
 %PY% -m pip install --upgrade pip
-%PY% -m pip install -r requirements.txt
+%PY% -m pip install -r app\requirements.txt
 
-if not exist ".env" (
-  copy ".env.example" ".env" >nul
+if not exist "config" mkdir config
+if not exist "config\.env" (
+  copy "config\.env.example" "config\.env" >nul
   echo.
-  echo Se ha creado el archivo .env.
+  echo Se ha creado el archivo config\.env.
   echo Editalo con las claves de correo, OpenAI y rutas de OneDrive antes de arrancar.
 ) else (
   echo.
-  echo Ya existe .env. No se ha tocado.
+  echo Ya existe config\.env. No se ha tocado.
 )
 
 echo.
 echo Creando accesos directos...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0crear_accesos_windows.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0platform\windows\crear_accesos_windows.ps1"
 
 echo.
 echo Instalacion terminada.
 echo.
 echo Siguiente paso:
-echo 1. Edita el archivo .env con las claves y rutas de OneDrive.
+echo 1. Edita el archivo config\.env con las claves y rutas de OneDrive.
 echo 2. Abre "MICE Travel Bot" desde el escritorio.
 if not defined CI pause

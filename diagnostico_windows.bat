@@ -8,8 +8,9 @@ if %errorlevel%==0 (
 ) else (
   set "PY=python"
 )
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 
-%PY% process_emails.py --diagnostico
+%PY% app\process_emails.py --diagnostico
 echo.
 if errorlevel 1 (
   echo Hay puntos que revisar antes de ejecutar el bot.

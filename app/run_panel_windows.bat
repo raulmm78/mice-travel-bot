@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 where py >nul 2>nul
 if %errorlevel%==0 (
@@ -8,6 +8,7 @@ if %errorlevel%==0 (
 ) else (
   set "PY=python"
 )
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 
 set "LOG_FILE=%TEMP%\mice_travel_bot_app.log"
-%PY% -u process_emails.py --dashboard >> "%LOG_FILE%" 2>&1
+%PY% -u app\process_emails.py --dashboard >> "%LOG_FILE%" 2>&1

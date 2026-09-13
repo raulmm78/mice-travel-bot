@@ -3,7 +3,7 @@
 ## Antes de ir al cliente
 
 - Confirmar que el repositorio de GitHub esta accesible.
-- Confirmar que `.env` no esta subido a GitHub.
+- Confirmar que `config/.env` no esta subido a GitHub.
 - Llevar anotadas las claves de correo/OpenAI por un canal seguro.
 - Llevar localizada la plantilla Excel oficial.
 - Confirmar la carpeta local de OneDrive donde deben crearse los listados.
@@ -15,12 +15,12 @@
 3. Iniciar sesion en OneDrive y esperar a que sincronice.
 4. Descargar o clonar el proyecto.
 5. Ejecutar `instalar_windows.bat`.
-6. Configurar `.env`.
+6. Configurar `config/.env`.
 7. Ejecutar `abrir_panel_windows.bat`.
 8. Comprobar luces verdes de IMAP y Excel.
 9. Ejecutar `diagnostico_windows.bat` antes de hacer la prueba real.
 
-## Variables minimas de `.env`
+## Variables minimas de `config/.env`
 
 ```text
 OPENAI_API_KEY=
@@ -53,7 +53,7 @@ WATCH_INTERVAL_SECONDS=300
 4. Verificar que el bot detecta los correos no leidos.
 5. Verificar que los marca como leidos.
 6. Verificar que crea o actualiza el Excel global.
-7. Verificar que crea el Excel por evento con formato `NO ENVIAR ---- NOMBRECONGRESO FECHAINICIOCONGRESO.xlsx`.
+7. Verificar que crea el Excel por evento con formato `NO ENVIAR -----LISTADO NOMBRECONGRESO FECHAINICIOCONGRESO.xlsx`.
 8. Verificar que el segundo ordenador ve los cambios por OneDrive.
 9. Editar manualmente alguna fila y comprobar si OneDrive genera conflicto.
 

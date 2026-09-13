@@ -31,20 +31,19 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-BASE_DIR = Path(__file__).resolve().parent
-EMAIL_DIR = BASE_DIR / "emails"
-ASSETS_DIR = BASE_DIR / "assets"
-ENV_PATH = BASE_DIR / ".env"
-DEFAULT_OUTPUT_DIR = BASE_DIR.parents[1] / "outputs"
+APP_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = APP_DIR.parent
+EMAIL_DIR = PROJECT_DIR / "data" / "emails"
+ASSETS_DIR = APP_DIR / "assets"
+ENV_PATH = PROJECT_DIR / "config" / ".env"
+LEGACY_ENV_PATH = PROJECT_DIR / ".env"
+DEFAULT_OUTPUT_DIR = PROJECT_DIR / "data" / "outputs"
 DEFAULT_EVENT_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "eventos"
 PROCESSED_IDS_FILENAME = "_bot_processed_message_ids.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
-WATCH_INTERVAL_SECONDS = int(os.getenv("WATCH_INTERVAL_SECONDS", "300"))
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
 EXCEL_DATE_FORMAT = "dd/mm/yy"
@@ -163,6 +162,8 @@ class TravelRequest:
 
 
 def load_env_file(path: Path = ENV_PATH) -> None:
+    if not path.exists() and LEGACY_ENV_PATH.exists():
+        path = LEGACY_ENV_PATH
     if not path.exists():
         return
 
@@ -409,7 +410,21 @@ def filename_text(value: str) -> str:
 def filename_date(value: str) -> str:
     parsed = parse_iso_date(value)
     if isinstance(parsed, date):
-        return parsed.strftime("%d-%m-%y")
+        months = {
+            1: "ENE",
+            2: "FEB",
+            3: "MAR",
+            4: "ABR",
+            5: "MAY",
+            6: "JUN",
+            7: "JUL",
+            8: "AGO",
+            9: "SEP",
+            10: "OCT",
+            11: "NOV",
+            12: "DIC",
+        }
+        return f"{parsed.day} {months[parsed.month]}"
     return "SIN FECHA"
 
 
@@ -420,7 +435,7 @@ def event_workbook_filename(event_name: str, rows: list[TravelRequest]) -> str:
         if isinstance(parse_iso_date(row.fecha_viaje), date)
     )
     first_date = dates[0] if dates else ""
-    return f"NO ENVIAR ---- {filename_text(event_name)} {filename_date(first_date)}.xlsx"
+    return f"NO ENVIAR -----LISTADO {filename_text(event_name)} {filename_date(first_date)}.xlsx"
 
 
 def manager_from_cc(text: str) -> str:
@@ -660,7 +675,7 @@ def parse_openai_text(response: dict[str, object]) -> str:
 def extract_with_openai(path: Path, api_key: str) -> TravelRequest:
     email_text = read_email(path)
     payload = {
-        "model": OPENAI_MODEL,
+        "model": openai_model(),
         "input": [
             {"role": "system", "content": EXTRACTION_PROMPT},
             {"role": "user", "content": f"Email a procesar:\n\n{email_text}"},
@@ -684,7 +699,7 @@ def extract_with_openai(path: Path, api_key: str) -> TravelRequest:
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
+    with urllib.request.urlopen(request, timeout=openai_timeout_seconds()) as response:
         body = json.loads(response.read().decode("utf-8"))
 
     extracted_text = parse_openai_text(body)
@@ -1181,6 +1196,18 @@ def mail_env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def openai_model() -> str:
+    return mail_env("OPENAI_MODEL", "gpt-4.1-mini")
+
+
+def openai_timeout_seconds() -> int:
+    return int(mail_env("OPENAI_TIMEOUT_SECONDS", "20"))
+
+
+def watch_interval_seconds() -> int:
+    return int(mail_env("WATCH_INTERVAL_SECONDS", "300"))
+
+
 def log_event(message: str) -> None:
     output_dir().mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1205,7 +1232,7 @@ def require_imap_config() -> None:
         if not mail_env(name)
     ]
     if missing:
-        raise ValueError("Faltan variables en .env: " + ", ".join(missing))
+        raise ValueError("Faltan variables en config/.env: " + ", ".join(missing))
 
 
 def imap_search_unseen(mailbox: imaplib.IMAP4_SSL) -> list[bytes]:
@@ -1274,9 +1301,10 @@ def bot_is_active() -> bool:
 
 def bot_loop() -> None:
     global BOT_ACTIVE
-    log_event(f"Bot automatico iniciado. Revision cada {WATCH_INTERVAL_SECONDS} segundos")
+    interval = watch_interval_seconds()
+    log_event(f"Bot automatico iniciado. Revision cada {interval} segundos")
     try:
-        while not BOT_STOP_EVENT.wait(WATCH_INTERVAL_SECONDS):
+        while not BOT_STOP_EVENT.wait(interval):
             try:
                 run_bot_once()
             except Exception as exc:
@@ -1367,7 +1395,7 @@ def send_demo_emails(count: int = 10) -> int:
         if not mail_env(name)
     ]
     if missing:
-        raise ValueError("Faltan variables SMTP en .env: " + ", ".join(missing))
+        raise ValueError("Faltan variables SMTP en config/.env: " + ", ".join(missing))
     smtp_host = mail_env("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(mail_env("SMTP_PORT", "587"))
     smtp_user = mail_env("SMTP_USER")
@@ -2038,7 +2066,7 @@ def watch_emails() -> None:
 
     try:
         while True:
-            time.sleep(WATCH_INTERVAL_SECONDS)
+            time.sleep(watch_interval_seconds())
             current = email_snapshot()
             if current != previous:
                 print("\nCambio detectado en emails/. Regenerando salidas...")

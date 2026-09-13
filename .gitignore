@@ -1,11 +1,17 @@
 .env
+config/.env
 __pycache__/
+app/__pycache__/
+.venv/
 *.pyc
 *.log
 *.xlsx
 *.csv
 *.json
 emails/
+data/emails/
 emails_archive/
+data/emails_archive/
 outputs/
+data/outputs/
 _bot_processed_message_ids.json

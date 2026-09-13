@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-$baseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$baseDir = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shell = New-Object -ComObject WScript.Shell
 
@@ -26,7 +27,7 @@ function New-Shortcut {
 $openBot = Join-Path $baseDir "abrir_panel_windows.bat"
 $closeBot = Join-Path $baseDir "cerrar_panel_windows.bat"
 $diagnostic = Join-Path $baseDir "diagnostico_windows.bat"
-$envFile = Join-Path $baseDir ".env"
+$envFile = Join-Path $baseDir "config\.env"
 
 New-Shortcut -Name "MICE Travel Bot" -Target $openBot
 New-Shortcut -Name "Cerrar MICE Travel Bot" -Target $closeBot
