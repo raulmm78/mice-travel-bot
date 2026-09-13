@@ -113,7 +113,9 @@ MAIL_TO=
 ALERT_EMAIL_TO=
 
 OUTPUT_DIR=
+XLSX_PATH=
 EVENT_OUTPUT_DIR=
+EVENT_ROUTES_PATH=
 PROCESSED_IDS_PATH=
 NN_TEMPLATE_PATH=
 WATCH_INTERVAL_SECONDS=300
@@ -127,14 +129,16 @@ Ejemplo Windows:
 
 ```text
 OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_global
+XLSX_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_global\viajes_global.xlsx
 EVENT_OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk
+EVENT_ROUTES_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\event_routes.json
 PROCESSED_IDS_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_bot_processed_message_ids.json
 NN_TEMPLATE_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\Plantillas\LISTADO PARA VOLCAR LOS DATOS NN.xlsx
 ```
 
 ## Excel por evento
 
-Cuando llega un evento nuevo, el bot agrupa por `NOMBRE EVENTO/CONGRESO/CURSO` y crea el Excel automaticamente.
+Cuando llega un evento nuevo, el bot agrupa por `NOMBRE EVENTO/CONGRESO/CURSO` y crea un Excel sugerido automaticamente. Ademas lo muestra en el panel como `Eventos nuevos`, para confirmar con el boton `Elegir Excel` si ese evento debe ir a ese archivo u otro.
 
 Formato del nombre:
 
@@ -155,6 +159,7 @@ NO ENVIAR -----LISTADO ESC MUNICH 28 AGO.xlsx
 - Marca el correo como leido despues de importarlo.
 - Genera Excel global, CSV y JSON.
 - Genera Excel por evento.
+- Permite elegir desde el panel el Excel global, la plantilla y el Excel asignado a cada evento nuevo.
 - Si falta informacion, marca la solicitud como `pendiente_revision`.
 - Si hay fallo tecnico, envia aviso por email si SMTP esta configurado.
 - Guarda `Message-ID` en `_bot_processed_message_ids.json` para reducir duplicados.

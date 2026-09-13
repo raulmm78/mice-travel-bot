@@ -16,6 +16,7 @@ import time
 import traceback
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from copy import copy
 from dataclasses import dataclass, asdict
@@ -40,6 +41,7 @@ LEGACY_ENV_PATH = PROJECT_DIR / ".env"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "data" / "outputs"
 DEFAULT_EVENT_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "eventos"
 PROCESSED_IDS_FILENAME = "_bot_processed_message_ids.json"
+EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
@@ -176,6 +178,28 @@ def load_env_file(path: Path = ENV_PATH) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def set_env_value(key: str, value: str, path: Path = ENV_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    updated = False
+    next_lines: list[str] = []
+    for line in lines:
+        clean = line.strip()
+        if clean and not clean.startswith("#") and "=" in clean:
+            current_key = clean.split("=", 1)[0].strip()
+            if current_key == key:
+                next_lines.append(f"{key}={value}")
+                updated = True
+                continue
+        next_lines.append(line)
+    if not updated:
+        if next_lines and next_lines[-1].strip():
+            next_lines.append("")
+        next_lines.append(f"{key}={value}")
+    path.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+    os.environ[key] = value
 
 
 EXTRACTION_PROMPT = """
@@ -436,6 +460,104 @@ def event_workbook_filename(event_name: str, rows: list[TravelRequest]) -> str:
     )
     first_date = dates[0] if dates else ""
     return f"NO ENVIAR -----LISTADO {filename_text(event_name)} {filename_date(first_date)}.xlsx"
+
+
+def event_key(event_name: str) -> str:
+    key = strip_accents(event_name).upper()
+    key = re.sub(r"[^A-Z0-9]+", " ", key)
+    return re.sub(r"\s+", " ", key).strip() or "SIN EVENTO"
+
+
+def event_routes_path() -> Path:
+    configured = os.getenv("EVENT_ROUTES_PATH", "").strip()
+    return Path(configured) if configured else PROJECT_DIR / "config" / EVENT_ROUTES_FILENAME
+
+
+def load_event_routes() -> dict[str, dict[str, str]]:
+    path = event_routes_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    routes: dict[str, dict[str, str]] = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            routes[str(key)] = {
+                "event_name": str(value.get("event_name", "")),
+                "excel_path": str(value.get("excel_path", "")),
+                "status": str(value.get("status", "assigned")),
+                "updated_at": str(value.get("updated_at", "")),
+            }
+    return routes
+
+
+def save_event_routes(routes: dict[str, dict[str, str]]) -> None:
+    path = event_routes_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(routes, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def suggested_event_workbook_path(event_name: str, rows: list[TravelRequest]) -> Path:
+    return event_output_root() / event_workbook_filename(event_name, rows)
+
+
+def event_workbook_path(event_name: str, rows: list[TravelRequest]) -> Path:
+    routes = load_event_routes()
+    route = routes.get(event_key(event_name), {})
+    configured_path = route.get("excel_path", "").strip()
+    if configured_path:
+        return Path(configured_path)
+    return suggested_event_workbook_path(event_name, rows)
+
+
+def remember_pending_event(event_name: str, rows: list[TravelRequest]) -> None:
+    routes = load_event_routes()
+    key = event_key(event_name)
+    route = routes.get(key, {})
+    if route.get("excel_path"):
+        return
+    suggested = str(suggested_event_workbook_path(event_name, rows))
+    routes[key] = {
+        "event_name": event_name,
+        "excel_path": suggested,
+        "status": "pending",
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_event_routes(routes)
+    log_event(f"Evento nuevo pendiente de confirmar Excel: {event_name}")
+
+
+def assign_event_excel(event_name: str, excel_path: Path) -> None:
+    routes = load_event_routes()
+    routes[event_key(event_name)] = {
+        "event_name": event_name,
+        "excel_path": str(excel_path),
+        "status": "assigned",
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_event_routes(routes)
+    log_event(f"Excel asignado para {event_name}: {excel_path}")
+
+
+def pending_event_routes(rows: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    routes = load_event_routes()
+    known_events = sorted({str(row.get("evento", "") or "SIN EVENTO") for row in rows or []}, key=event_key)
+    pending: list[dict[str, str]] = []
+    for event_name in known_events:
+        route = routes.get(event_key(event_name), {})
+        if route.get("status") != "assigned":
+            pending.append(
+                {
+                    "event_name": event_name,
+                    "excel_path": route.get("excel_path", ""),
+                    "status": route.get("status", "pending"),
+                }
+            )
+    return pending
 
 
 def manager_from_cc(text: str) -> str:
@@ -1016,7 +1138,8 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         event_root = event_output_root()
         clear_local_event_outputs(event_root)
         for event_name, event_rows in by_event.items():
-            event_path = event_root / event_workbook_filename(event_name, event_rows)
+            remember_pending_event(event_name, event_rows)
+            event_path = event_workbook_path(event_name, event_rows)
             write_nn_excel(event_rows, event_path, event_name)
         return
 
@@ -1024,7 +1147,8 @@ def write_outputs(rows: list[TravelRequest]) -> None:
     event_root = event_output_root()
     clear_local_event_outputs(event_root)
     for event_name, event_rows in by_event.items():
-        event_path = event_root / event_workbook_filename(event_name, event_rows)
+        remember_pending_event(event_name, event_rows)
+        event_path = event_workbook_path(event_name, event_rows)
         write_basic_excel(event_rows, event_path, event_name)
 
 
@@ -1522,6 +1646,52 @@ def process_paths(paths: list[Path], use_openai: bool | None = None) -> list[Tra
     return rows
 
 
+def choose_excel_file(title: str = "Elegir Excel") -> Path | None:
+    if sys.platform == "darwin":
+        script = f'POSIX path of (choose file with prompt "{title}" of type {{"xlsx"}})'
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+        value = result.stdout.strip()
+        return Path(value) if result.returncode == 0 and value else None
+
+    if sys.platform.startswith("win"):
+        command = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.OpenFileDialog; "
+            f"$d.Title = '{title}'; "
+            "$d.Filter = 'Excel (*.xlsx)|*.xlsx|Todos (*.*)|*.*'; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.FileName }"
+        )
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True, check=False)
+        value = result.stdout.strip()
+        return Path(value) if result.returncode == 0 and value else None
+
+    return None
+
+
+def choose_save_excel_file(title: str, default_name: str) -> Path | None:
+    if sys.platform == "darwin":
+        safe_name = default_name.replace('"', "'")
+        script = f'POSIX path of (choose file name with prompt "{title}" default name "{safe_name}")'
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+        value = result.stdout.strip()
+        return Path(value) if result.returncode == 0 and value else None
+
+    if sys.platform.startswith("win"):
+        command = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.SaveFileDialog; "
+            f"$d.Title = '{title}'; "
+            f"$d.FileName = '{default_name}'; "
+            "$d.Filter = 'Excel (*.xlsx)|*.xlsx'; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.FileName }"
+        )
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True, check=False)
+        value = result.stdout.strip()
+        return Path(value) if result.returncode == 0 and value else None
+
+    return None
+
+
 def open_excel_file() -> None:
     if not xlsx_path().exists():
         process_all()
@@ -1532,6 +1702,42 @@ def open_excel_file() -> None:
     else:
         subprocess.run(["xdg-open", str(xlsx_path())], check=False)
     log_event("Excel abierto desde el panel")
+
+
+def choose_global_excel() -> Path | None:
+    chosen = choose_save_excel_file("Elegir o crear Excel global", xlsx_path().name)
+    if not chosen:
+        return None
+    if chosen.suffix.lower() != ".xlsx":
+        chosen = chosen.with_suffix(".xlsx")
+    set_env_value("XLSX_PATH", str(chosen))
+    set_env_value("OUTPUT_DIR", str(chosen.parent))
+    process_all()
+    log_event(f"Excel global configurado: {chosen}")
+    return chosen
+
+
+def choose_template_excel() -> Path | None:
+    chosen = choose_excel_file("Elegir plantilla Excel")
+    if not chosen:
+        return None
+    set_env_value("NN_TEMPLATE_PATH", str(chosen))
+    process_all()
+    log_event(f"Plantilla Excel configurada: {chosen}")
+    return chosen
+
+
+def choose_event_excel(event_name: str) -> Path | None:
+    matching_rows = [row for row in process_all() if event_key(row.evento or "SIN EVENTO") == event_key(event_name)]
+    default_name = event_workbook_filename(event_name, matching_rows)
+    chosen = choose_save_excel_file(f"Elegir Excel para {event_name}", default_name)
+    if not chosen:
+        return None
+    if chosen.suffix.lower() != ".xlsx":
+        chosen = chosen.with_suffix(".xlsx")
+    assign_event_excel(event_name, chosen)
+    process_all()
+    return chosen
 
 
 def rows_as_dicts() -> list[dict[str, str]]:
@@ -1548,6 +1754,7 @@ def dashboard_html() -> str:
     excel_ready = excel_is_ready()
     bot_active = bot_is_active()
     generated_at = time.strftime("%H:%M:%S")
+    pending_events = pending_event_routes(rows)
     ok_count = sum(1 for row in rows if row.get("estado") == "ok")
     pending_count = len(rows) - ok_count
     preview_fields = [
@@ -1573,6 +1780,27 @@ def dashboard_html() -> str:
     )
     headers = "".join(f"<th>{html.escape(label)}</th>" for _field, label in preview_fields)
     logs = "\n".join(html.escape(line) for line in recent_logs(50)) or "Sin actividad todavia."
+    pending_html = ""
+    if pending_events:
+        items = "\n".join(
+            f"""
+            <div class="pending-event">
+              <div>
+                <strong>{html.escape(item['event_name'])}</strong>
+                <span>{html.escape(item.get('excel_path') or 'Sin Excel asignado')}</span>
+              </div>
+              <button class="secondary" onclick="assignEventExcel({json.dumps(item['event_name'])})">Elegir Excel</button>
+            </div>
+            """
+            for item in pending_events
+        )
+        pending_html = f"""
+        <div class="pending-panel">
+          <h2>Eventos nuevos</h2>
+          <p>El bot ha detectado eventos sin Excel confirmado. Elige dónde guardar cada listado.</p>
+          {items}
+        </div>
+        """
     return f"""<!doctype html>
 <html lang="es">
 <head>
@@ -1664,7 +1892,7 @@ def dashboard_html() -> str:
     }}
     .toolbar {{
       display: grid;
-      grid-template-columns: 220px auto auto auto 1fr;
+      grid-template-columns: 220px auto auto auto auto auto 1fr;
       gap: 14px;
       align-items: center;
       padding: 16px 32px;
@@ -1795,6 +2023,42 @@ def dashboard_html() -> str:
     }}
     .metric .ok {{ color: var(--ok); }}
     .metric .warn {{ color: var(--warn); }}
+    .pending-panel {{
+      margin-bottom: 18px;
+      background: var(--panel);
+      border: 1px solid rgba(246,200,96,.42);
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 14px 34px rgba(0,0,0,.24);
+    }}
+    .pending-panel h2 {{
+      margin: 0 0 6px;
+      font-size: 16px;
+    }}
+    .pending-panel p {{
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .pending-event {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--soft-line);
+    }}
+    .pending-event strong {{
+      display: block;
+      font-size: 14px;
+    }}
+    .pending-event span {{
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      word-break: break-all;
+    }}
     section, aside {{
       min-width: 0;
     }}
@@ -1889,6 +2153,8 @@ def dashboard_html() -> str:
       </button>
       <span class="health"><span class="dot {'ok' if mail_ready else ''}"></span>IMAP</span>
       <span class="health"><span class="dot {'ok' if excel_ready else ''}"></span>Excel</span>
+      <button class="health-action" onclick="selectTemplateExcel()">Plantilla</button>
+      <button class="health-action" onclick="selectGlobalExcel()">Excel global</button>
       <button class="health-action" onclick="openExcel()">Abrir Excel</button>
       <span id="status">Listo.</span>
     </div>
@@ -1899,6 +2165,7 @@ def dashboard_html() -> str:
           <div class="metric"><div class="label">Correctas</div><div class="value ok">{ok_count}</div></div>
           <div class="metric"><div class="label">Pendientes</div><div class="value warn">{pending_count}</div></div>
         </div>
+        {pending_html}
         <div class="table-wrap">
           <table aria-label="Solicitudes procesadas">
             <thead><tr>{headers}</tr></thead>
@@ -1942,6 +2209,27 @@ def dashboard_html() -> str:
     function openExcel() {{
       callApi('/api/open-excel', 'Abriendo Excel...');
     }}
+    function selectGlobalExcel() {{
+      callApi('/api/select-global-excel', 'Eligiendo Excel global...');
+    }}
+    function selectTemplateExcel() {{
+      callApi('/api/select-template-excel', 'Eligiendo plantilla...');
+    }}
+    async function assignEventExcel(eventName) {{
+      const status = document.getElementById('status');
+      status.textContent = 'Eligiendo Excel para ' + eventName + '...';
+      const response = await fetch('/api/assign-event-excel', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ event_name: eventName }})
+      }});
+      if (!response.ok) {{
+        const data = await response.json().catch(() => ({{}}));
+        status.textContent = data.error || 'No se pudo asignar el Excel.';
+        return;
+      }}
+      window.location.reload();
+    }}
   </script>
 </body>
 </html>"""
@@ -1981,6 +2269,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.handle_post()
         except Exception as exc:
             self.send_json({"error": str(exc)}, status=500)
+
+    def read_json_body(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
 
     def handle_post(self) -> None:
         if self.path == "/api/generate":
@@ -2034,6 +2330,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if self.path == "/api/open-excel":
             open_excel_file()
             self.send_json({"opened": str(xlsx_path())})
+            return
+        if self.path == "/api/select-global-excel":
+            chosen = choose_global_excel()
+            self.send_json({"selected": str(chosen) if chosen else ""})
+            return
+        if self.path == "/api/select-template-excel":
+            chosen = choose_template_excel()
+            self.send_json({"selected": str(chosen) if chosen else ""})
+            return
+        if self.path == "/api/assign-event-excel":
+            data = self.read_json_body()
+            event_name = str(data.get("event_name", "") or "").strip()
+            if not event_name:
+                self.send_json({"error": "Falta el nombre del evento"}, status=400)
+                return
+            chosen = choose_event_excel(event_name)
+            self.send_json({"event_name": event_name, "selected": str(chosen) if chosen else ""})
             return
         self.send_json({"error": "not_found"}, status=404)
 

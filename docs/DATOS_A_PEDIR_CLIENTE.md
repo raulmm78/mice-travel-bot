@@ -42,7 +42,10 @@ Donde se mete:
 
 ```text
 OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_global
+XLSX_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\_global\viajes_global.xlsx
 ```
+
+Tambien se puede elegir desde el panel con el boton `Excel global`.
 
 ## 4. Plantilla Excel oficial
 
@@ -57,6 +60,29 @@ Donde se mete:
 ```text
 NN_TEMPLATE_PATH=C:\ruta\a\LISTADO PARA VOLCAR LOS DATOS NN.xlsx
 ```
+
+Tambien se puede elegir desde el panel con el boton `Plantilla`.
+
+## 4.1. Excel por evento
+
+Pedir:
+
+- Si los Excel por evento se guardaran todos en una carpeta base.
+- Si para cada evento nuevo prefieren crear un Excel nuevo o elegir uno existente.
+
+Donde se mete la carpeta base:
+
+```text
+EVENT_OUTPUT_DIR=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk
+EVENT_ROUTES_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\EMPRESAS\Novo Nordisk\event_routes.json
+```
+
+Como funciona:
+
+- Si llega un evento nuevo, el bot genera un nombre sugerido.
+- En el panel aparece en `Eventos nuevos`.
+- Desde ahi se pulsa `Elegir Excel` para confirmar donde se guarda ese evento.
+- Esa asignacion queda guardada y las siguientes solicitudes del mismo evento iran al mismo Excel.
 
 ## 5. Buzon que recibe solicitudes
 
