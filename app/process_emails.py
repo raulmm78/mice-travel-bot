@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import imaplib
 import html
 import json
@@ -422,6 +423,50 @@ def clean_message_id(value: str) -> str:
     if not value:
         return ""
     return value.strip("<>").strip().lower()
+
+
+def normalize_key_part(value: object) -> str:
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.isoformat()
+    parsed_date = parse_iso_date(str(value or ""))
+    if isinstance(parsed_date, date):
+        return parsed_date.isoformat()
+    text = strip_accents(str(value or "")).upper()
+    text = re.sub(r"[^A-Z0-9@._+-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def row_dedupe_key_from_values(
+    event_name: object,
+    nombre: object,
+    apellidos: object,
+    dni: object,
+    email: object,
+    fecha_viaje: object,
+) -> str:
+    parts = [
+        normalize_key_part(event_name),
+        normalize_key_part(nombre),
+        normalize_key_part(apellidos),
+        normalize_dni(str(dni or "")),
+        normalize_key_part(email).lower(),
+        normalize_key_part(fecha_viaje),
+    ]
+    digest = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()
+    return f"row:{digest}"
+
+
+def row_dedupe_key(item: TravelRequest) -> str:
+    return row_dedupe_key_from_values(
+        item.evento,
+        item.nombre,
+        item.apellidos,
+        item.dni,
+        item.email,
+        item.fecha_viaje,
+    )
 
 
 def filename_text(value: str) -> str:
@@ -983,6 +1028,7 @@ def mark_processed_message_ids(rows: list[TravelRequest]) -> None:
         message_id = clean_message_id(row.source_message_id)
         if message_id:
             message_ids.add(message_id)
+        message_ids.add(row_dedupe_key(row))
     save_processed_message_ids(message_ids)
 
 
@@ -1006,6 +1052,82 @@ def apply_bot_added_font(sheet, row_num: int, max_col: int, has_dietary_restrict
     )
 
 
+def sheet_value(sheet, cell_ref: str) -> object:
+    return sheet[cell_ref].value
+
+
+def nn_existing_row_keys(sheet) -> set[str]:
+    keys: set[str] = set()
+    for row_num in range(4, sheet.max_row + 1):
+        dni = sheet_value(sheet, f"O{row_num}")
+        if not dni:
+            continue
+        keys.add(
+            row_dedupe_key_from_values(
+                sheet_value(sheet, f"D{row_num}"),
+                sheet_value(sheet, f"M{row_num}"),
+                sheet_value(sheet, f"N{row_num}"),
+                dni,
+                sheet_value(sheet, f"U{row_num}"),
+                sheet_value(sheet, f"X{row_num}"),
+            )
+        )
+    return keys
+
+
+def nn_next_append_row(sheet) -> int:
+    columns = ("D", "M", "N", "O", "U", "X", "AR")
+    for row_num in range(sheet.max_row, 3, -1):
+        if any(sheet[f"{column}{row_num}"].value not in (None, "") for column in columns):
+            return row_num + 1
+    return 4
+
+
+def write_nn_row(sheet, row_num: int, item: TravelRequest) -> None:
+    max_col = sheet.max_column
+    copy_row_style(sheet, 4, row_num, max_col)
+    values = {
+        "A": row_num - 3,
+        "B": billing_month(item.fecha_viaje),
+        "D": excel_text(item.evento),
+        "E": item.delegado_rma,
+        "F": excel_text(item.gerente),
+        "G": item.cost_center,
+        "H": item.internal_order,
+        "I": item.selas_id,
+        "J": excel_text(item.ponente_oyente),
+        "L": excel_text(item.especialidad),
+        "M": excel_text(item.nombre),
+        "N": excel_text(item.apellidos),
+        "O": item.dni,
+        "U": excel_text(item.email, email=True),
+        "V": item.telefono,
+        "W": excel_text(item.origen),
+        "X": parse_iso_date(item.fecha_viaje),
+        "AA": excel_text(item.conex_ida),
+        "AB": excel_text(item.desplazamientos_ida),
+        "AC": excel_text(item.desplazamientos_vuelta),
+        "AD": excel_text(item.conex_regreso),
+        "AE": excel_text(item.hotel),
+        "AF": parse_iso_date(item.hotel_in),
+        "AG": parse_iso_date(item.hotel_out),
+        "AH": excel_text(item.inscripcion),
+        "AI": excel_text(item.socio),
+        "AO": excel_text(item.restricciones_alimentarias),
+        "AR": excel_text(item.observaciones),
+    }
+    for column, value in values.items():
+        sheet[f"{column}{row_num}"] = value
+
+    sheet[f"B{row_num}"].number_format = EXCEL_MONTH_FORMAT
+    for date_column in ("X", "AF", "AG"):
+        sheet[f"{date_column}{row_num}"].number_format = EXCEL_DATE_FORMAT
+    has_dietary_restriction = item.restricciones_alimentarias.strip().lower() not in {"", "no", "ninguna", "ninguno"}
+    apply_bot_added_font(sheet, row_num, max_col, has_dietary_restriction)
+    sheet[f"AR{row_num}"].alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[row_num].height = 44
+
+
 def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, title: str | None = None) -> bool:
     template = nn_template_path()
     if not template:
@@ -1013,63 +1135,30 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
 
     output_path = output_path or xlsx_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    workbook = load_workbook(template)
+    workbook = load_workbook(output_path if output_path.exists() else template)
     sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
     sheet.title = "Totales"
     sheet.conditional_formatting._cf_rules.clear()
     sheet.sheet_view.showGridLines = False
     sheet.freeze_panes = "A4"
     sheet.auto_filter.ref = "A3:DP3"
-    sheet["A2"] = excel_text(title or "LISTADO GLOBAL")
+    if not output_path.exists():
+        sheet["A2"] = excel_text(title or "LISTADO GLOBAL")
 
     max_col = sheet.max_column
-    last_display_row = max(40, 3 + len(rows))
-    for row_num in range(4, last_display_row + 1):
-        for col in range(1, max_col + 1):
-            sheet.cell(row=row_num, column=col).value = None
-
-    apply_nn_row_banding(sheet, max_col, 4, last_display_row)
-
-    for index, item in enumerate(rows, start=4):
-        copy_row_style(sheet, 4, index, max_col)
-        values = {
-            "A": index - 3,
-            "B": billing_month(item.fecha_viaje),
-            "D": excel_text(item.evento),
-            "E": item.delegado_rma,
-            "F": excel_text(item.gerente),
-            "G": item.cost_center,
-            "H": item.internal_order,
-            "I": item.selas_id,
-            "J": excel_text(item.ponente_oyente),
-            "L": excel_text(item.especialidad),
-            "M": excel_text(item.nombre),
-            "N": excel_text(item.apellidos),
-            "O": item.dni,
-            "U": excel_text(item.email, email=True),
-            "V": item.telefono,
-            "W": excel_text(item.origen),
-            "X": parse_iso_date(item.fecha_viaje),
-            "AA": excel_text(item.conex_ida),
-            "AB": excel_text(item.desplazamientos_ida),
-            "AC": excel_text(item.desplazamientos_vuelta),
-            "AD": excel_text(item.conex_regreso),
-            "AE": excel_text(item.hotel),
-            "AF": parse_iso_date(item.hotel_in),
-            "AG": parse_iso_date(item.hotel_out),
-            "AH": excel_text(item.inscripcion),
-            "AI": excel_text(item.socio),
-            "AO": excel_text(item.restricciones_alimentarias),
-            "AR": excel_text(item.observaciones),
-        }
-        for column, value in values.items():
-            sheet[f"{column}{index}"] = value
-
-        sheet[f"B{index}"].number_format = EXCEL_MONTH_FORMAT
-        for date_column in ("X", "AF", "AG"):
-            sheet[f"{date_column}{index}"].number_format = EXCEL_DATE_FORMAT
-        has_dietary_restriction = item.restricciones_alimentarias.strip().lower() not in {"", "no", "ninguna", "ninguno"}
-        sheet[f"AR{index}"].alignment = Alignment(wrap_text=True, vertical="top")
+    existing_keys = nn_existing_row_keys(sheet)
+    batch_keys: set[str] = set()
+    next_row = nn_next_append_row(sheet)
+    added_count = 0
+    for item in rows:
+        key = row_dedupe_key(item)
+        if key in existing_keys or key in batch_keys:
+            continue
+        write_nn_row(sheet, next_row, item)
+        existing_keys.add(key)
+        batch_keys.add(key)
+        next_row += 1
+        added_count += 1
 
     widths = {
         "A": 7,
@@ -1101,18 +1190,14 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
     }
     for column, width in widths.items():
         sheet.column_dimensions[column].width = width
-    apply_nn_row_banding(sheet, max_col, 4, last_display_row)
-
-    apply_nn_font_style(sheet, max_col, last_display_row)
-    for index, item in enumerate(rows, start=4):
-        has_dietary_restriction = item.restricciones_alimentarias.strip().lower() not in {"", "no", "ninguna", "ninguno"}
-        apply_bot_added_font(sheet, index, max_col, has_dietary_restriction)
-        sheet[f"AR{index}"].alignment = Alignment(wrap_text=True, vertical="top")
-        sheet[f"B{index}"].number_format = EXCEL_MONTH_FORMAT
-        for date_column in ("X", "AF", "AG"):
-            sheet[f"{date_column}{index}"].number_format = EXCEL_DATE_FORMAT
+    if not output_path.exists():
+        apply_nn_row_banding(sheet, max_col, 4, max(40, sheet.max_row))
+        apply_nn_font_style(sheet, max_col, max(40, sheet.max_row))
+        for row_num in range(4, sheet.max_row + 1):
+            sheet.row_dimensions[row_num].height = 44
 
     save_workbook_safely(workbook, output_path)
+    log_event(f"Excel actualizado en modo append: {output_path} ({added_count} filas nuevas)")
     return True
 
 
@@ -1155,19 +1240,54 @@ def write_outputs(rows: list[TravelRequest]) -> None:
 def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) -> None:
     headers = OUTPUT_FIELDS
     data = [{field: asdict(row).get(field, "") for field in headers} for row in rows]
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Totales"
-    sheet.append([title])
-    sheet.append(headers)
+    if output_path.exists():
+        workbook = load_workbook(output_path)
+        sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
+        sheet.title = "Totales"
+    else:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Totales"
+        sheet.append([title])
+        sheet.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E78")
     for cell in sheet[2]:
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
 
+    header_positions = {str(cell.value): index + 1 for index, cell in enumerate(sheet[2])}
+    existing_keys: set[str] = set()
+    for row_num in range(3, sheet.max_row + 1):
+        dni_col = header_positions.get("dni")
+        if not dni_col or not sheet.cell(row=row_num, column=dni_col).value:
+            continue
+        existing_keys.add(
+            row_dedupe_key_from_values(
+                sheet.cell(row=row_num, column=header_positions.get("evento", 1)).value,
+                sheet.cell(row=row_num, column=header_positions.get("nombre", 1)).value,
+                sheet.cell(row=row_num, column=header_positions.get("apellidos", 1)).value,
+                sheet.cell(row=row_num, column=dni_col).value,
+                sheet.cell(row=row_num, column=header_positions.get("email", 1)).value,
+                sheet.cell(row=row_num, column=header_positions.get("fecha_viaje", 1)).value,
+            )
+        )
+
+    batch_keys: set[str] = set()
     for item in data:
+        key = row_dedupe_key_from_values(
+            item.get("evento", ""),
+            item.get("nombre", ""),
+            item.get("apellidos", ""),
+            item.get("dni", ""),
+            item.get("email", ""),
+            item.get("fecha_viaje", ""),
+        )
+        if key in existing_keys or key in batch_keys:
+            continue
         sheet.append([item[header] for header in headers])
+        batch_keys.add(key)
+        existing_keys.add(key)
 
     status_col = headers.index("estado") + 1
     for row in range(3, sheet.max_row + 1):
@@ -1376,6 +1496,15 @@ def imap_search_unseen(mailbox: imaplib.IMAP4_SSL) -> list[bytes]:
     if status != "OK":
         raise RuntimeError("No se pudo buscar correo en IMAP")
     return data[0].split()
+
+
+def is_travel_request_email(subject: str, body: str) -> bool:
+    normalized_subject = strip_accents(subject).upper()
+    normalized_body = strip_accents(body).upper()
+    return (
+        "NUEVA SOLICITUD" in normalized_subject
+        and "DATOS PARA PETICIONES DE INVITADOS" in normalized_body
+    )
 
 
 def open_imap_mailbox() -> imaplib.IMAP4_SSL:
@@ -1599,6 +1728,10 @@ def import_new_mail() -> list[Path]:
             cc_value = str(message.get("Cc") or "")
             subject = str(message.get("Subject") or "")
             body = message_body(message)
+            if not is_travel_request_email(subject, body):
+                mailbox.uid("store", uid, "+FLAGS", "(\\Seen)")
+                log_event(f"Correo omitido: no parece formulario de viaje ({subject})")
+                continue
             path.write_text(
                 f"Message-ID: {message_id}\nDe: {from_value}\nPara: {to_value}\nCC: {cc_value}\nAsunto: {subject}\n\n{body}",
                 encoding="utf-8",

@@ -90,6 +90,27 @@ Debe mostrar OK en:
 - Carpeta eventos escribible.
 - Registro anti-duplicados escribible.
 
+## Test de seguridad del Excel
+
+Antes de apuntar a un Excel real, puedes ejecutar:
+
+```text
+test_seguridad_excel_windows.bat
+```
+
+Debe mostrar:
+
+```text
+OK - Seguridad Excel verificada
+```
+
+Comprueba que:
+
+- Se filtran correos que no son formulario.
+- Se aceptan reenvios `RV:` o `FW:` si contienen el formulario.
+- No se borran filas antiguas del Excel.
+- No se duplica la misma solicitud al repetir el proceso.
+
 ## Recomendacion para varios ordenadores
 
 Primera version:
