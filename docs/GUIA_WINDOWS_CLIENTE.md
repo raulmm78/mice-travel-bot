@@ -2,6 +2,17 @@
 
 ## Instalacion desde cero
 
+Si usas el ZIP:
+
+1. Boton derecho sobre `MICE Travel Bot_windows_con_claves_20260913.zip`.
+2. Pulsar `Extraer todo...`.
+3. Entrar en la carpeta extraida `MICE Travel Bot`.
+4. Ejecutar `instalar_windows.bat`.
+
+No ejecutes `instalar_windows.bat` desde dentro del ZIP, porque Windows muestra los archivos como si estuvieran ahi pero el instalador no puede encontrar bien `app\requirements.txt`.
+
+## Instalacion desde GitHub
+
 En cada PC Windows, abrir PowerShell y ejecutar:
 
 ```powershell

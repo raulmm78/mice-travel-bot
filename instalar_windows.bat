@@ -7,6 +7,52 @@ echo Instalador MICE Travel Bot
 echo ================================================
 echo.
 
+echo Comprobando carpeta de instalacion...
+echo %CD% | findstr /i "\\\\.zip\\" >nul
+if %errorlevel%==0 (
+  echo.
+  echo Parece que has abierto el instalador desde dentro del ZIP.
+  echo.
+  echo Solucion:
+  echo 1. Cierra esta ventana.
+  echo 2. Boton derecho sobre el ZIP.
+  echo 3. Pulsa "Extraer todo...".
+  echo 4. Entra en la carpeta extraida "MICE Travel Bot".
+  echo 5. Ejecuta de nuevo instalar_windows.bat.
+  echo.
+  explorer "%~dp0"
+  if not defined CI pause
+  exit /b 1
+)
+
+if not exist "app\requirements.txt" (
+  echo.
+  echo No encuentro app\requirements.txt.
+  echo Esto suele pasar si el ZIP no se ha extraido correctamente o si estas dentro de una carpeta incompleta.
+  echo.
+  echo Comprueba que en esta carpeta existan:
+  echo - app
+  echo - config
+  echo - docs
+  echo - instalar_windows.bat
+  echo.
+  echo Si estas viendo el contenido desde el ZIP, usa "Extraer todo..." primero.
+  echo.
+  explorer "%CD%"
+  if not defined CI pause
+  exit /b 1
+)
+
+if not exist "app\process_emails.py" (
+  echo.
+  echo No encuentro app\process_emails.py.
+  echo La carpeta del bot esta incompleta. Extrae de nuevo el ZIP completo.
+  echo.
+  explorer "%CD%"
+  if not defined CI pause
+  exit /b 1
+)
+
 where py >nul 2>nul
 if %errorlevel%==0 (
   set "PY=py -3"

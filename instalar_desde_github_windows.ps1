@@ -15,6 +15,9 @@ function Install-WithWinget {
     )
 
     if (-not (Command-Exists "winget")) {
+        if ($Name -like "Python*") {
+            throw "No se ha encontrado winget. Instala Python manualmente desde https://www.python.org/downloads/windows/ marcando 'Add python.exe to PATH' y vuelve a ejecutar el instalador."
+        }
         throw "No se ha encontrado winget. Instala $Name manualmente y vuelve a ejecutar el instalador."
     }
 
@@ -32,7 +35,14 @@ if (-not (Command-Exists "py") -and -not (Command-Exists "python")) {
 }
 
 if (-not (Command-Exists "git")) {
-    Install-WithWinget -PackageId "Git.Git" -Name "Git"
+    try {
+        Install-WithWinget -PackageId "Git.Git" -Name "Git"
+    } catch {
+        Write-Host $_.Exception.Message
+        Write-Host "Git solo es necesario para descargar/actualizar desde GitHub."
+        Write-Host "Para instalar desde ZIP, extrae el ZIP y ejecuta instalar_windows.bat."
+        exit 1
+    }
 }
 
 if (-not (Command-Exists "git")) {
