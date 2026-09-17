@@ -4,12 +4,12 @@
 
 Si usas el ZIP:
 
-1. Boton derecho sobre `MICE Travel Bot_windows_con_claves_20260913.zip`.
+1. Boton derecho sobre el ZIP mas reciente `MICE Travel Bot_windows_cliente_TEST_BOT_*.zip`.
 2. Pulsar `Extraer todo...`.
 3. Entrar en la carpeta extraida `MICE Travel Bot`.
 4. Ejecutar `instalar_windows.bat`.
 
-No ejecutes `instalar_windows.bat` desde dentro del ZIP, porque Windows muestra los archivos como si estuvieran ahi pero el instalador no puede encontrar bien `app\requirements.txt`.
+No ejecutes `instalar_windows.bat` desde dentro del ZIP, porque Windows muestra los archivos como si estuvieran ahi pero el instalador no puede encontrar bien `app\requirements.txt`. Si el ZIP ya incluye `config/.env`, el instalador conserva esas claves y rutas.
 
 ## Instalacion desde GitHub
 
@@ -110,6 +110,8 @@ Comprueba que:
 - Se aceptan reenvios `RV:` o `FW:` si contienen el formulario.
 - No se borran filas antiguas del Excel.
 - No se duplica la misma solicitud al repetir el proceso.
+- Los Excel existentes, tanto el global como los de evento, conservan sus filas.
+- Los eventos nuevos esperan a que pulses `Elegir Excel` o `Crear Excel` en el panel.
 
 ## Recomendacion para varios ordenadores
 

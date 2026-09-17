@@ -1032,13 +1032,6 @@ def mark_processed_message_ids(rows: list[TravelRequest]) -> None:
     save_processed_message_ids(message_ids)
 
 
-def clear_local_event_outputs(event_root: Path) -> None:
-    if event_root.resolve() != DEFAULT_EVENT_OUTPUT_DIR.resolve() or not event_root.exists():
-        return
-    for path in event_root.glob("*.xlsx"):
-        path.unlink()
-
-
 def apply_bot_added_font(sheet, row_num: int, max_col: int, has_dietary_restriction: bool) -> None:
     for col in range(1, max_col + 1):
         cell = sheet.cell(row=row_num, column=col)
@@ -1138,11 +1131,15 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
     workbook = load_workbook(output_path if output_path.exists() else template)
     sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
     sheet.title = "Totales"
-    sheet.conditional_formatting._cf_rules.clear()
-    sheet.sheet_view.showGridLines = False
-    sheet.freeze_panes = "A4"
-    sheet.auto_filter.ref = "A3:DP3"
     if not output_path.exists():
+        for row in sheet.iter_rows(min_row=4):
+            for cell in row:
+                if cell.value is not None and cell.data_type != "f":
+                    cell.value = None
+        sheet.conditional_formatting._cf_rules.clear()
+        sheet.sheet_view.showGridLines = False
+        sheet.freeze_panes = "A4"
+        sheet.auto_filter.ref = "A3:DP3"
         sheet["A2"] = excel_text(title or "LISTADO GLOBAL")
 
     max_col = sheet.max_column
@@ -1159,6 +1156,9 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         batch_keys.add(key)
         next_row += 1
         added_count += 1
+
+    if output_path.exists() and added_count == 0:
+        return True
 
     widths = {
         "A": 7,
@@ -1220,21 +1220,19 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         by_event.setdefault(event_name, []).append(row)
 
     if write_nn_excel(rows, xlsx_path(), "LISTADO GLOBAL"):
-        event_root = event_output_root()
-        clear_local_event_outputs(event_root)
         for event_name, event_rows in by_event.items():
             remember_pending_event(event_name, event_rows)
-            event_path = event_workbook_path(event_name, event_rows)
-            write_nn_excel(event_rows, event_path, event_name)
+            route = load_event_routes().get(event_key(event_name), {})
+            if route.get("status") == "assigned":
+                write_nn_excel(event_rows, Path(route["excel_path"]), event_name)
         return
 
     write_basic_excel(rows, xlsx_path(), "LISTADO GLOBAL")
-    event_root = event_output_root()
-    clear_local_event_outputs(event_root)
     for event_name, event_rows in by_event.items():
         remember_pending_event(event_name, event_rows)
-        event_path = event_workbook_path(event_name, event_rows)
-        write_basic_excel(event_rows, event_path, event_name)
+        route = load_event_routes().get(event_key(event_name), {})
+        if route.get("status") == "assigned":
+            write_basic_excel(event_rows, Path(route["excel_path"]), event_name)
 
 
 def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) -> None:
@@ -1868,9 +1866,25 @@ def choose_event_excel(event_name: str) -> Path | None:
         return None
     if chosen.suffix.lower() != ".xlsx":
         chosen = chosen.with_suffix(".xlsx")
+    if chosen.resolve() == xlsx_path().resolve():
+        raise ValueError("El Excel del evento no puede ser el Excel global")
     assign_event_excel(event_name, chosen)
     process_all()
     return chosen
+
+
+def create_event_excel(event_name: str) -> Path:
+    rows = process_all()
+    matching_rows = [row for row in rows if event_key(row.evento or "SIN EVENTO") == event_key(event_name)]
+    if not matching_rows:
+        raise ValueError(f"No hay solicitudes para {event_name}")
+    suggested = suggested_event_workbook_path(event_name, matching_rows)
+    if suggested.resolve() == xlsx_path().resolve():
+        raise ValueError("El Excel del evento coincide con el global")
+    if not write_nn_excel(matching_rows, suggested, event_name):
+        write_basic_excel(matching_rows, suggested, event_name)
+    assign_event_excel(event_name, suggested)
+    return suggested
 
 
 def rows_as_dicts() -> list[dict[str, str]]:
@@ -1922,7 +1936,10 @@ def dashboard_html() -> str:
                 <strong>{html.escape(item['event_name'])}</strong>
                 <span>{html.escape(item.get('excel_path') or 'Sin Excel asignado')}</span>
               </div>
-              <button class="secondary" onclick="assignEventExcel({json.dumps(item['event_name'])})">Elegir Excel</button>
+              <div class="event-actions">
+                <button class="secondary" onclick="assignEventExcel({json.dumps(item['event_name'])})">Elegir Excel</button>
+                <button class="secondary" onclick="createEventExcel({json.dumps(item['event_name'])})">Crear Excel</button>
+              </div>
             </div>
             """
             for item in pending_events
@@ -2185,6 +2202,12 @@ def dashboard_html() -> str:
       display: block;
       font-size: 14px;
     }}
+    .event-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }}
     .pending-event span {{
       display: block;
       margin-top: 4px;
@@ -2363,6 +2386,21 @@ def dashboard_html() -> str:
       }}
       window.location.reload();
     }}
+    async function createEventExcel(eventName) {{
+      const status = document.getElementById('status');
+      status.textContent = 'Creando Excel para ' + eventName + '...';
+      const response = await fetch('/api/create-event-excel', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ event_name: eventName }})
+      }});
+      const data = await response.json().catch(() => ({{}}));
+      if (!response.ok) {{
+        status.textContent = data.error || 'No se pudo crear el Excel.';
+        return;
+      }}
+      window.location.reload();
+    }}
   </script>
 </body>
 </html>"""
@@ -2480,6 +2518,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             chosen = choose_event_excel(event_name)
             self.send_json({"event_name": event_name, "selected": str(chosen) if chosen else ""})
+            return
+        if self.path == "/api/create-event-excel":
+            data = self.read_json_body()
+            event_name = str(data.get("event_name", "") or "").strip()
+            if not event_name:
+                self.send_json({"error": "Falta el nombre del evento"}, status=400)
+                return
+            try:
+                created = create_event_excel(event_name)
+            except (ValueError, OSError) as exc:
+                self.send_json({"error": str(exc)}, status=400)
+                return
+            self.send_json({"event_name": event_name, "created": str(created)})
             return
         self.send_json({"error": "not_found"}, status=404)
 

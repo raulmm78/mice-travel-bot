@@ -112,12 +112,13 @@ set "PY=.venv\Scripts\python.exe"
 if not exist "config" mkdir config
 if not exist "config\.env" (
   copy "config\.env.example" "config\.env" >nul
+  set "NEEDS_CONFIG=1"
   echo.
   echo Se ha creado el archivo config\.env.
   echo Editalo con las claves de correo, OpenAI y rutas de OneDrive antes de arrancar.
 ) else (
   echo.
-  echo Ya existe config\.env. No se ha tocado.
+  echo Ya existe config\.env. Se conservaron sus claves y rutas.
 )
 
 echo.
@@ -128,6 +129,12 @@ echo.
 echo Instalacion terminada.
 echo.
 echo Siguiente paso:
-echo 1. Edita el archivo config\.env con las claves y rutas de OneDrive.
-echo 2. Abre "MICE Travel Bot" desde el escritorio.
+if defined NEEDS_CONFIG (
+  echo 1. Edita config\.env con las claves y rutas de OneDrive.
+  echo 2. Ejecuta diagnostico_windows.bat.
+  echo 3. Abre "MICE Travel Bot" desde el escritorio.
+) else (
+  echo 1. Ejecuta diagnostico_windows.bat.
+  echo 2. Abre "MICE Travel Bot" desde el escritorio.
+)
 if not defined CI pause

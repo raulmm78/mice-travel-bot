@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 from datetime import date
+from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 
@@ -13,6 +14,7 @@ from process_emails import (
     write_basic_excel,
     write_nn_excel,
 )
+import process_emails
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -94,10 +96,59 @@ def test_nn_append() -> None:
         assert_true(sheet["O6"].value in (None, ""), "Se ha duplicado la fila nueva")
 
 
+def test_global_and_event_flow() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        template = root / "plantilla.xlsx"
+        global_path = root / "global.xlsx"
+        events = root / "eventos"
+        events.mkdir()
+        workbook = Workbook()
+        workbook.active.title = "Totales"
+        workbook.active["M4"] = "PERSONA DE PLANTILLA"
+        workbook.active["O4"] = "99999999R"
+        workbook.save(template)
+        old = request("ANTIGUO", "11111111H", "old")
+        new = request("NUEVO", "22222222J", "new")
+        other = request("OTRO", "33333333P", "other")
+        other.evento = "Congreso EULAR"
+        existing_event = events / "NO ENVIAR -----LISTADO CONGRESO IMS 28 SEP.xlsx"
+        env = {
+            "NN_TEMPLATE_PATH": str(template),
+            "OUTPUT_DIR": str(root),
+            "XLSX_PATH": str(global_path),
+            "EVENT_OUTPUT_DIR": str(events),
+            "EVENT_ROUTES_PATH": str(root / "routes.json"),
+        }
+        with patch.dict(os.environ, env):
+            write_nn_excel([old], global_path, "GLOBAL")
+            write_nn_excel([old], existing_event, "Congreso IMS")
+            process_emails.assign_event_excel("Congreso IMS", existing_event)
+            process_emails.write_outputs([old, new, other])
+            assert_true(existing_event.exists(), "Se ha eliminado el Excel de evento")
+            suggested = process_emails.suggested_event_workbook_path("Congreso EULAR", [other])
+            assert_true(not suggested.exists(), "Se ha creado un Excel antes de confirmar el evento")
+            with patch.object(process_emails, "process_all", return_value=[old, new, other]):
+                created = process_emails.create_event_excel("Congreso EULAR")
+            assert_true(created == suggested and created.exists(), "No se ha creado el Excel sugerido")
+            process_emails.write_outputs([old, new, other])
+
+        global_sheet = load_workbook(global_path)["Totales"]
+        event_sheet = load_workbook(existing_event)["Totales"]
+        new_sheet = load_workbook(suggested)["Totales"]
+        assert_true([global_sheet[f"O{row}"].value for row in (4, 5, 6)] ==
+                    ["11111111H", "22222222J", "33333333P"], "El global perdio o duplico filas")
+        assert_true([event_sheet[f"O{row}"].value for row in (4, 5)] ==
+                    ["11111111H", "22222222J"], "El Excel de evento perdio o duplico filas")
+        assert_true(new_sheet["O4"].value == "33333333P" and new_sheet["O5"].value is None,
+                    "El evento nuevo se ha duplicado")
+
+
 def main() -> None:
     test_filter()
     test_basic_append()
     test_nn_append()
+    test_global_and_event_flow()
     print("OK - Seguridad Excel verificada")
     print("- Filtra correos que no son formulario")
     print("- Acepta reenvios RV/FW si contienen el formulario")
