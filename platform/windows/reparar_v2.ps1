@@ -12,6 +12,17 @@ $expectedCodeHash = "650317E1E025498F6E5D94558863C82FCA8DBEDDF5F470D160125E3DFD5
 $expectedLauncherHash = "F7E1750537EFDEA5E1BEB3DCA38EB133136FCD8B0C28E9EFAA9B26B2D20B890C"
 $replaced = $false
 
+function Get-PortableHash([string]$path) {
+    $content = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8).Replace("`r`n", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "")
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 "Reparacion v2 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Set-Content -Path $log -Encoding UTF8
 try {
     if (-not (Test-Path $codeTarget) -or -not (Test-Path $launcherTarget)) {
@@ -20,10 +31,10 @@ try {
     if (-not (Test-Path $codeSource) -or -not (Test-Path $launcherSource)) {
         throw "Faltan archivos de la reparacion. Espera a que OneDrive termine de sincronizar la carpeta."
     }
-    if ((Get-FileHash $codeSource -Algorithm SHA256).Hash -ne $expectedCodeHash) {
+    if ((Get-PortableHash $codeSource) -ne $expectedCodeHash) {
         throw "El codigo v2 no coincide con el archivo esperado. No se ha instalado."
     }
-    if ((Get-FileHash $launcherSource -Algorithm SHA256).Hash -ne $expectedLauncherHash) {
+    if ((Get-PortableHash $launcherSource) -ne $expectedLauncherHash) {
         throw "El lanzador v2 no coincide con el archivo esperado. No se ha instalado."
     }
 
@@ -38,10 +49,10 @@ try {
     Copy-Item $codeSource $codeTarget -Force
     $replaced = $true
     Copy-Item $launcherSource $launcherTarget -Force
-    if ((Get-FileHash $codeTarget -Algorithm SHA256).Hash -ne $expectedCodeHash) {
+    if ((Get-PortableHash $codeTarget) -ne $expectedCodeHash) {
         throw "El codigo copiado no supera la verificacion."
     }
-    if ((Get-FileHash $launcherTarget -Algorithm SHA256).Hash -ne $expectedLauncherHash) {
+    if ((Get-PortableHash $launcherTarget) -ne $expectedLauncherHash) {
         throw "El lanzador copiado no supera la verificacion."
     }
 
