@@ -50,6 +50,7 @@ EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
+APP_VERSION = "v2"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
@@ -2097,7 +2098,7 @@ def dashboard_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MICE Travel Bot</title>
+  <title>MICE TRAVEL BOT {APP_VERSION}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -2145,6 +2146,12 @@ def dashboard_html() -> str:
       width: 210px;
       max-width: 42vw;
       height: auto;
+    }}
+    .app-version {{
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
     }}
     .meta {{
       display: flex;
@@ -2442,6 +2449,7 @@ def dashboard_html() -> str:
       <div>
         <img class="brand-logo" src="/assets/logo-micetravel-blanco.png" alt="MICE Travel">
       </div>
+      <span class="app-version">MICE TRAVEL BOT {APP_VERSION}</span>
     </header>
     <div class="toolbar">
       <button id="powerButton" class="power {'is-on' if bot_active else ''}" onclick="toggleBot()">
@@ -2555,6 +2563,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(content)
 
@@ -2690,7 +2699,7 @@ def find_available_port(start_port: int) -> int:
 def serve_dashboard() -> None:
     port = find_available_port(int(mail_env("EMAIL_AGENT_PORT", str(DEFAULT_SERVER_PORT))))
     server = ThreadingHTTPServer((SERVER_HOST, port), DashboardHandler)
-    print(f"Panel demo: http://{SERVER_HOST}:{port}")
+    print(f"MICE TRAVEL BOT {APP_VERSION}: http://{SERVER_HOST}:{port}")
     print("Pulsa Ctrl+C para parar.")
     try:
         server.serve_forever()

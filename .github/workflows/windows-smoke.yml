@@ -101,7 +101,7 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 "http://127.0.0.1:8765/"
-                if ($response.StatusCode -eq 200 -and $response.Content.Contains("MICE Travel Bot")) {
+                if ($response.StatusCode -eq 200 -and $response.Content.Contains("MICE TRAVEL BOT v2")) {
                   $ok = $true
                   break
                 }
