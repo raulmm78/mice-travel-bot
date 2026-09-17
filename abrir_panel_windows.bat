@@ -25,8 +25,7 @@ if not errorlevel 1 (
   exit /b 0
 )
 
-echo Buscando actualizaciones y arrancando MICE Travel Bot...
-%PY% -u app\update_before_start.py > "%LOG_FILE%" 2>&1
+echo Arrancando MICE Travel Bot localmente...
 
 start "MICE Travel Bot" /min "%~dp0app\run_panel_windows.bat"
 

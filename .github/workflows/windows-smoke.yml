@@ -93,6 +93,7 @@ jobs:
       - name: Run dashboard smoke test
         shell: pwsh
         run: |
+          Remove-Item "$env:RUNNER_TEMP\mice-output\viajes_demo.*" -ErrorAction SilentlyContinue
           $proc = Start-Process -FilePath "python" -ArgumentList "-u", "app/process_emails.py", "--dashboard" -PassThru -WindowStyle Hidden
           try {
             $ok = $false
@@ -107,6 +108,9 @@ jobs:
               } catch {}
             }
             if (-not $ok) { throw "El panel no responde en Windows" }
+            if (Test-Path "$env:RUNNER_TEMP\mice-output\viajes_demo.xlsx") {
+              throw "Abrir el panel no debe procesar ni modificar el Excel"
+            }
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
