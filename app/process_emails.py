@@ -1641,7 +1641,7 @@ def open_imap_mailbox() -> imaplib.IMAP4_SSL:
     imap_user = mail_env("IMAP_USER")
     imap_password = mail_env("IMAP_PASSWORD")
     imap_folder = mail_env("IMAP_FOLDER", "INBOX")
-    mailbox = imaplib.IMAP4_SSL(imap_host, imap_port)
+    mailbox = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=10)
     mailbox.login(imap_user, imap_password)
     mailbox.select(imap_folder)
     return mailbox
@@ -2030,7 +2030,7 @@ def create_event_excel(event_name: str) -> Path:
 
 def rows_as_dicts() -> list[dict[str, str]]:
     if not json_path().exists():
-        process_all()
+        return []
     with json_path().open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -2038,9 +2038,9 @@ def rows_as_dicts() -> list[dict[str, str]]:
 def dashboard_html() -> str:
     rows = rows_as_dicts()
     openai_ready = bool(os.getenv("OPENAI_API_KEY", "").strip())
-    mail_ready = imap_is_ok()
-    excel_ready = excel_is_ready()
     bot_active = bot_is_active()
+    mail_ready = imap_is_ok() if bot_active else False
+    excel_ready = excel_is_ready()
     generated_at = time.strftime("%H:%M:%S")
     pending_events = pending_event_routes(rows)
     ok_count = sum(1 for row in rows if row.get("estado") == "ok")
