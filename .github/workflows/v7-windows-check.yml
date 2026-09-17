@@ -2,7 +2,7 @@ name: V7 Windows end-to-end
 
 on:
   push:
-    branches: [codex/v6-validation]
+    branches: [codex/v6-validation, main]
   workflow_dispatch:
 
 jobs:
