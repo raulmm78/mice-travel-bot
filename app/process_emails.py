@@ -2688,7 +2688,6 @@ def find_available_port(start_port: int) -> int:
 
 
 def serve_dashboard() -> None:
-    process_all()
     port = find_available_port(int(mail_env("EMAIL_AGENT_PORT", str(DEFAULT_SERVER_PORT))))
     server = ThreadingHTTPServer((SERVER_HOST, port), DashboardHandler)
     print(f"Panel demo: http://{SERVER_HOST}:{port}")
