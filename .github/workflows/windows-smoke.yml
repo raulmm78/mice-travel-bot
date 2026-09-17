@@ -60,6 +60,14 @@ jobs:
       - name: Verify GitHub update without Git
         run: python app/update_test.py
 
+      - name: Validate Windows activation script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("activar_actualizaciones_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+
       - name: Run local processing smoke test
         shell: pwsh
         run: |

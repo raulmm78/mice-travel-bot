@@ -13,7 +13,9 @@ No ejecutes `instalar_windows.bat` desde dentro del ZIP, porque Windows muestra 
 
 ## Activar actualizaciones en un PC ya instalado desde ZIP antiguo
 
-El ZIP entregado antes de esta mejora no puede actualizarse solo porque su actualizador antiguo exigia Git. Una vez, en PowerShell del PC cliente:
+El ZIP entregado antes de esta mejora no puede actualizarse solo porque su actualizador antiguo exigia Git. Una vez, extrae el ZIP `MICE_Travel_Bot_ACTUALIZAR_Windows_*.zip` y ejecuta `ACTUALIZAR_MICE_TRAVEL_BOT_windows.bat`. Cierra antes el bot con el acceso directo `Cerrar MICE Travel Bot`.
+
+Alternativamente, en PowerShell del PC cliente:
 
 ```powershell
 $script = Join-Path $env:TEMP "activar_actualizaciones_windows.ps1"
@@ -21,7 +23,7 @@ Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/raulmm78/m
 powershell -NoProfile -ExecutionPolicy Bypass -File $script
 ```
 
-El script localiza la instalacion mediante el acceso directo del escritorio y cambia solo `app/update_before_start.py`. Conserva `config/.env`, correos, registros y Excels. Cierra el panel y vuelve a abrir la app: descargara el codigo mas reciente desde GitHub. Desde ese momento no hace falta enviar mas ZIPs para actualizar el programa.
+El script localiza la instalacion mediante el acceso directo del escritorio, activa el nuevo actualizador y descarga inmediatamente el codigo mas reciente desde GitHub. Conserva `config/.env`, correos, registros y Excels. Desde ese momento no hace falta enviar mas ZIPs para actualizar el programa.
 
 ## Instalacion desde GitHub
 

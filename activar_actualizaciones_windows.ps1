@@ -25,5 +25,18 @@ $backup = "$updater.antes_github"
 Copy-Item $updater $backup -Force
 Copy-Item $download $updater -Force
 Write-Host "Actualizaciones desde GitHub activadas en $installDir"
-Write-Host "Cierra el panel si esta abierto y vuelve a abrir MICE Travel Bot."
-Write-Host "En ese arranque descargara automaticamente la version mas reciente."
+
+$python = Join-Path $installDir ".venv\Scripts\python.exe"
+if (Test-Path $python) {
+    & $python -u $updater
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    & py -3 -u $updater
+} else {
+    & python -u $updater
+}
+$installedCommit = Get-Content (Join-Path $installDir "config\.github_commit") -ErrorAction SilentlyContinue | Select-Object -First 1
+$latestCommit = (Invoke-RestMethod -Uri "https://api.github.com/repos/raulmm78/mice-travel-bot/commits/main" -Headers @{ "User-Agent" = "MICE-Travel-Bot-Updater" }).sha
+if ($installedCommit -ne $latestCommit) {
+    throw "No se pudo verificar la ultima version. Revisa la conexion a GitHub y vuelve a ejecutar este archivo."
+}
+Write-Host "Version actual descargada. Abre MICE Travel Bot desde el escritorio."
