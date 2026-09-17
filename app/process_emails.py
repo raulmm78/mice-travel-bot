@@ -50,7 +50,7 @@ EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
-APP_VERSION = "v2"
+APP_VERSION = "v3"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
@@ -60,6 +60,7 @@ BOT_LOCK = threading.Lock()
 BOT_STOP_EVENT = threading.Event()
 BOT_THREAD: threading.Thread | None = None
 BOT_ACTIVE = False
+BOT_PHASE = "Listo."
 OUTPUT_FIELDS = [
     "email_id",
     "source_message_id",
@@ -1317,6 +1318,7 @@ def write_nn_excel(
 
 
 def write_outputs(rows: list[TravelRequest]) -> None:
+    global BOT_PHASE
     output_dir().mkdir(parents=True, exist_ok=True)
     data = [{field: asdict(row).get(field, "") for field in OUTPUT_FIELDS} for row in rows]
 
@@ -1334,16 +1336,19 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         event_name = row.evento.strip() or "SIN EVENTO"
         by_event.setdefault(event_name, []).append(row)
 
+    BOT_PHASE = "Guardando Excel global..."
     if write_nn_excel(rows, xlsx_path(), "LISTADO GLOBAL"):
         for event_name, event_rows in by_event.items():
             remember_pending_event(event_name, event_rows)
             route = load_event_routes().get(event_key(event_name), {})
             if route.get("status") == "assigned":
+                BOT_PHASE = f"Guardando listado: {event_name}..."
                 event_path = Path(route["excel_path"])
                 event_template = event_template_path()
                 if not event_path.exists() and not event_template:
                     raise ValueError("Falta la plantilla NN de eventos. Instala el ZIP de plantilla antes de crear listados.")
                 write_nn_excel(event_rows, event_path, event_name, event_template)
+        BOT_PHASE = "Excel actualizado."
         return
 
     write_basic_excel(rows, xlsx_path(), "LISTADO GLOBAL")
@@ -1351,7 +1356,9 @@ def write_outputs(rows: list[TravelRequest]) -> None:
         remember_pending_event(event_name, event_rows)
         route = load_event_routes().get(event_key(event_name), {})
         if route.get("status") == "assigned":
+            BOT_PHASE = f"Guardando listado: {event_name}..."
             write_basic_excel(event_rows, Path(route["excel_path"]), event_name)
+    BOT_PHASE = "Excel actualizado."
 
 
 def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) -> None:
@@ -1676,13 +1683,19 @@ def excel_is_ready() -> bool:
 
 
 def run_bot_once() -> tuple[int, list[Path], list[TravelRequest]]:
+    global BOT_PHASE
     try:
+        BOT_PHASE = "Comprobando correos..."
         unread_before = check_unread_mail()
+        BOT_PHASE = "Importando correos..."
         imported = import_new_mail()
+        BOT_PHASE = "Extrayendo datos..."
         rows = process_all()
+        BOT_PHASE = "Excel actualizado."
         log_event(f"Bot ON: {unread_before} no leidos detectados, {len(imported)} importados")
         return unread_before, imported, rows
     except Exception as exc:
+        BOT_PHASE = f"Error: {exc}"
         notify_bot_error("Error ejecutando lectura de correo y volcado a Excel", exc)
         raise
 
@@ -1710,6 +1723,7 @@ def bot_loop() -> None:
 
 def start_bot() -> tuple[int, list[Path], list[TravelRequest]]:
     global BOT_ACTIVE, BOT_THREAD
+    test_imap_connection()
     result = run_bot_once()
     with BOT_LOCK:
         if not BOT_ACTIVE:
@@ -1892,8 +1906,10 @@ def process_all() -> list[TravelRequest]:
 
 
 def process_paths(paths: list[Path], use_openai: bool | None = None) -> list[TravelRequest]:
+    global BOT_PHASE
     if use_openai is None:
         use_openai = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    BOT_PHASE = f"Extrayendo datos de {len(paths)} correos..."
     rows = [extract_request_auto(path, use_openai) for path in paths]
     write_outputs(rows)
     mark_processed_message_ids(rows)
@@ -2040,7 +2056,6 @@ def dashboard_html() -> str:
     rows = rows_as_dicts()
     openai_ready = bool(os.getenv("OPENAI_API_KEY", "").strip())
     bot_active = bot_is_active()
-    mail_ready = imap_is_ok() if bot_active else False
     excel_ready = excel_is_ready()
     generated_at = time.strftime("%H:%M:%S")
     pending_events = pending_event_routes(rows)
@@ -2187,6 +2202,10 @@ def dashboard_html() -> str:
     .dot.ok {{
       background: var(--ok);
       box-shadow: 0 0 0 4px rgba(103,214,155,.12);
+    }}
+    .dot.checking {{
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgba(246,200,96,.12);
     }}
     .toolbar {{
       display: grid;
@@ -2452,11 +2471,11 @@ def dashboard_html() -> str:
       <span class="app-version">MICE TRAVEL BOT {APP_VERSION}</span>
     </header>
     <div class="toolbar">
-      <button id="powerButton" class="power {'is-on' if bot_active else ''}" onclick="toggleBot()">
+      <button id="powerButton" class="power {'is-on' if bot_active else ''}" onclick="toggleBot()" {'disabled' if not bot_active else ''}>
         <span class="switch-track"><span class="switch-knob"></span></span>
         <span class="power-text"><strong>{"ON" if bot_active else "OFF"}</strong><span>{"Cada 5 minutos" if bot_active else "Activar bot"}</span></span>
       </button>
-      <span class="health"><span class="dot {'ok' if mail_ready else ''}"></span>IMAP</span>
+      <span class="health" id="imapHealth"><span class="dot checking"></span>IMAP</span>
       <span class="health"><span class="dot {'ok' if excel_ready else ''}"></span>Excel</span>
       <button class="health-action" onclick="selectTemplateExcel()">Plantilla</button>
       <button class="health-action" onclick="selectGlobalExcel()">Excel global</button>
@@ -2485,6 +2504,27 @@ def dashboard_html() -> str:
     </main>
   </div>
   <script>
+    let imapReady = false;
+    async function verifyImap() {{
+      const button = document.getElementById('powerButton');
+      const dot = document.querySelector('#imapHealth .dot');
+      const status = document.getElementById('status');
+      dot.className = 'dot checking';
+      if (!button.classList.contains('is-on')) button.disabled = true;
+      status.textContent = 'Comprobando IMAP...';
+      try {{
+        const response = await fetch('/api/test-mail', {{ method: 'POST' }});
+        if (!response.ok) throw new Error('IMAP no disponible');
+        imapReady = true;
+        dot.className = 'dot ok';
+        if (!button.classList.contains('is-on')) button.disabled = false;
+        status.textContent = 'IMAP verificado. Listo.';
+      }} catch (error) {{
+        imapReady = false;
+        dot.className = 'dot';
+        status.textContent = 'IMAP no disponible. No se activará el bot.';
+      }}
+    }}
     async function callApi(path, message, reload = true) {{
       const status = document.getElementById('status');
       status.textContent = message;
@@ -2500,16 +2540,36 @@ def dashboard_html() -> str:
       const button = document.getElementById('powerButton');
       const isOn = button.classList.contains('is-on');
       if (isOn) {{
-        button.classList.remove('is-on');
-        button.querySelector('strong').textContent = 'OFF';
-        button.querySelector('.power-text span').textContent = 'Deteniendo';
+        button.disabled = true;
         await callApi('/api/stop-bot', 'Bot detenido.');
         return;
       }}
-      button.classList.add('is-on');
-      button.querySelector('strong').textContent = 'ON';
+      if (!imapReady) return;
+      button.disabled = true;
       button.querySelector('.power-text span').textContent = 'Procesando';
-      await callApi('/api/start-bot', 'Bot activo: buscando correos, actualizando Excel y marcando como leídos...');
+      const status = document.getElementById('status');
+      status.textContent = 'IMAP verificado. Actualizando Excel...';
+      const progressTimer = setInterval(async () => {{
+        try {{
+          const response = await fetch('/api/status');
+          const data = await response.json();
+          if (data.phase) status.textContent = data.phase;
+        }} catch (error) {{}}
+      }}, 2000);
+      try {{
+        const response = await fetch('/api/start-bot', {{ method: 'POST' }});
+        if (!response.ok) {{
+          const data = await response.json().catch(() => ({{}}));
+          throw new Error(data.error || 'No se pudo activar el bot.');
+        }}
+        window.location.reload();
+      }} catch (error) {{
+        status.textContent = error.message;
+        button.querySelector('.power-text span').textContent = 'Activar bot';
+        button.disabled = false;
+      }} finally {{
+        clearInterval(progressTimer);
+      }}
     }}
     function openExcel() {{
       callApi('/api/open-excel', 'Abriendo Excel...');
@@ -2550,6 +2610,7 @@ def dashboard_html() -> str:
       }}
       window.location.reload();
     }}
+    verifyImap();
   </script>
 </body>
 </html>"""
@@ -2571,6 +2632,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_bytes(json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", status)
 
     def do_GET(self) -> None:
+        if self.path == "/api/status":
+            self.send_json({"phase": BOT_PHASE, "on": bot_is_active()})
+            return
         if self.path == "/":
             self.send_bytes(dashboard_html().encode("utf-8"), "text/html; charset=utf-8")
             return

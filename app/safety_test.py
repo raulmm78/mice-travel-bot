@@ -57,6 +57,28 @@ def test_filter() -> None:
     )
 
 
+def test_imap_gate_before_processing() -> None:
+    with patch.object(process_emails, "test_imap_connection", side_effect=RuntimeError("IMAP no disponible")):
+        with patch.object(process_emails, "run_bot_once") as process:
+            try:
+                process_emails.start_bot()
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("El bot se activo sin comprobar IMAP")
+            process.assert_not_called()
+
+
+def test_dashboard_checks_imap_before_on() -> None:
+    with patch.object(process_emails, "rows_as_dicts", return_value=[]):
+        with patch.object(process_emails, "excel_is_ready", return_value=True):
+            with patch.object(process_emails, "recent_logs", return_value=[]):
+                with patch.object(process_emails, "pending_event_routes", return_value=[]):
+                    html = process_emails.dashboard_html()
+    assert_true('id="powerButton"' in html and "disabled" in html, "ON no espera a la comprobacion IMAP")
+    assert_true("verifyImap();" in html and "MICE TRAVEL BOT v3" in html, "Falta la verificacion IMAP de v3")
+
+
 def test_basic_append() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "basic.xlsx"
@@ -262,6 +284,8 @@ def test_supplied_template_when_available() -> None:
 
 def main() -> None:
     test_filter()
+    test_imap_gate_before_processing()
+    test_dashboard_checks_imap_before_on()
     test_basic_append()
     test_nn_append()
     test_conflict_stops_before_replace()
