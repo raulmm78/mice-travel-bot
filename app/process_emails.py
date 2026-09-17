@@ -8,6 +8,7 @@ import json
 import os
 import random
 import re
+import shutil
 import socket
 import smtplib
 import subprocess
@@ -19,6 +20,8 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+import zipfile
 from copy import copy
 from dataclasses import dataclass, asdict
 from datetime import date, datetime
@@ -1008,12 +1011,52 @@ def save_processed_message_ids(message_ids: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def save_workbook_safely(workbook: Workbook, output_path: Path) -> None:
+def workbook_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_existing_cells_preserved(original: Path, candidate: Path) -> None:
+    with zipfile.ZipFile(original) as old_zip, zipfile.ZipFile(candidate) as new_zip:
+        missing_parts = set(old_zip.namelist()) - set(new_zip.namelist())
+        missing_parts -= {"xl/sharedStrings.xml", "xl/calcChain.xml"}
+        if missing_parts:
+            raise ValueError(f"El guardado eliminaria partes del Excel: {', '.join(sorted(missing_parts)[:3])}")
+    old_book = load_workbook(original)
+    new_book = load_workbook(candidate)
+    for old_sheet in old_book:
+        if old_sheet.title not in new_book.sheetnames:
+            raise ValueError(f"La hoja {old_sheet.title} desapareceria del Excel")
+        new_sheet = new_book[old_sheet.title]
+        for (row, column), old_cell in old_sheet._cells.items():
+            if old_cell.value is not None and new_sheet.cell(row, column).value != old_cell.value:
+                raise ValueError(f"La celda {old_sheet.title}!{old_cell.coordinate} cambiaria")
+
+
+def save_workbook_safely(workbook: Workbook, output_path: Path, expected_digest: str | None = None) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = output_path.with_name(f".{output_path.stem}.tmp-{os.getpid()}.xlsx")
+    temp_path = output_path.with_name(f".{output_path.stem}.tmp-{uuid.uuid4().hex}.xlsx")
     try:
         workbook.save(temp_path)
-        os.replace(temp_path, output_path)
+        if expected_digest is not None:
+            if not output_path.exists() or workbook_digest(output_path) != expected_digest:
+                raise RuntimeError(f"El Excel cambio mientras se procesaba: {output_path}")
+            backup_dir = output_path.parent / "_bot_backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_path = backup_dir / f"{output_path.stem}.{datetime.now():%Y%m%d-%H%M%S}.{uuid.uuid4().hex[:8]}.xlsx"
+            shutil.copy2(output_path, backup_path)
+            if workbook_digest(backup_path) != expected_digest:
+                raise RuntimeError(f"No se pudo verificar la copia de seguridad: {output_path}")
+            verify_existing_cells_preserved(backup_path, temp_path)
+            if workbook_digest(output_path) != expected_digest:
+                raise RuntimeError(f"El Excel cambio durante la verificacion: {output_path}")
+        if expected_digest is None:
+            os.link(temp_path, output_path)
+        else:
+            os.replace(temp_path, output_path)
     finally:
         if temp_path.exists():
             try:
@@ -1069,9 +1112,8 @@ def nn_existing_row_keys(sheet) -> set[str]:
 
 
 def nn_next_append_row(sheet) -> int:
-    columns = ("D", "M", "N", "O", "U", "X", "AR")
     for row_num in range(sheet.max_row, 3, -1):
-        if any(sheet[f"{column}{row_num}"].value not in (None, "") for column in columns):
+        if any(cell.value not in (None, "") for cell in sheet[row_num]):
             return row_num + 1
     return 4
 
@@ -1128,10 +1170,14 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
 
     output_path = output_path or xlsx_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    workbook = load_workbook(output_path if output_path.exists() else template)
+    exists = output_path.exists()
+    expected_digest = workbook_digest(output_path) if exists else None
+    workbook = load_workbook(output_path if exists else template)
+    if exists and "Totales" not in workbook.sheetnames:
+        raise ValueError(f"El Excel existente no tiene hoja Totales: {output_path}")
     sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
-    sheet.title = "Totales"
-    if not output_path.exists():
+    if not exists:
+        sheet.title = "Totales"
         for row in sheet.iter_rows(min_row=4):
             for cell in row:
                 if cell.value is not None and cell.data_type != "f":
@@ -1157,7 +1203,7 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         next_row += 1
         added_count += 1
 
-    if output_path.exists() and added_count == 0:
+    if exists and added_count == 0:
         return True
 
     widths = {
@@ -1188,15 +1234,15 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         "AO": 18,
         "AR": 70,
     }
-    for column, width in widths.items():
-        sheet.column_dimensions[column].width = width
-    if not output_path.exists():
+    if not exists:
+        for column, width in widths.items():
+            sheet.column_dimensions[column].width = width
         apply_nn_row_banding(sheet, max_col, 4, max(40, sheet.max_row))
         apply_nn_font_style(sheet, max_col, max(40, sheet.max_row))
         for row_num in range(4, sheet.max_row + 1):
             sheet.row_dimensions[row_num].height = 44
 
-    save_workbook_safely(workbook, output_path)
+    save_workbook_safely(workbook, output_path, expected_digest)
     log_event(f"Excel actualizado en modo append: {output_path} ({added_count} filas nuevas)")
     return True
 
@@ -1238,10 +1284,13 @@ def write_outputs(rows: list[TravelRequest]) -> None:
 def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) -> None:
     headers = OUTPUT_FIELDS
     data = [{field: asdict(row).get(field, "") for field in headers} for row in rows]
-    if output_path.exists():
+    exists = output_path.exists()
+    expected_digest = workbook_digest(output_path) if exists else None
+    if exists:
         workbook = load_workbook(output_path)
-        sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
-        sheet.title = "Totales"
+        if "Totales" not in workbook.sheetnames:
+            raise ValueError(f"El Excel existente no tiene hoja Totales: {output_path}")
+        sheet = workbook["Totales"]
     else:
         workbook = Workbook()
         sheet = workbook.active
@@ -1249,12 +1298,15 @@ def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) 
         sheet.append([title])
         sheet.append(headers)
 
-    header_fill = PatternFill("solid", fgColor="1F4E78")
-    for cell in sheet[2]:
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.fill = header_fill
+    if not exists:
+        header_fill = PatternFill("solid", fgColor="1F4E78")
+        for cell in sheet[2]:
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = header_fill
 
     header_positions = {str(cell.value): index + 1 for index, cell in enumerate(sheet[2])}
+    if exists and any(header_positions.get(field) != index + 1 for index, field in enumerate(headers)):
+        raise ValueError(f"El Excel existente no tiene el formato basico esperado: {output_path}")
     existing_keys: set[str] = set()
     for row_num in range(3, sheet.max_row + 1):
         dni_col = header_positions.get("dni")
@@ -1272,6 +1324,7 @@ def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) 
         )
 
     batch_keys: set[str] = set()
+    first_new_row = sheet.max_row + 1
     for item in data:
         key = row_dedupe_key_from_values(
             item.get("evento", ""),
@@ -1287,20 +1340,24 @@ def write_basic_excel(rows: list[TravelRequest], output_path: Path, title: str) 
         batch_keys.add(key)
         existing_keys.add(key)
 
+    if exists and sheet.max_row < first_new_row:
+        return
+
     status_col = headers.index("estado") + 1
-    for row in range(3, sheet.max_row + 1):
+    for row in range(first_new_row if exists else 3, sheet.max_row + 1):
         status = sheet.cell(row=row, column=status_col).value
         fill = PatternFill("solid", fgColor="C6EFCE" if status == "ok" else "FFEB9C")
         for col in range(1, sheet.max_column + 1):
             sheet.cell(row=row, column=col).fill = fill
 
-    for col in range(1, sheet.max_column + 1):
-        letter = get_column_letter(col)
-        max_len = max(len(str(sheet.cell(row=row, column=col).value or "")) for row in range(1, sheet.max_row + 1))
-        sheet.column_dimensions[letter].width = min(max(max_len + 2, 12), 42)
+    if not exists:
+        for col in range(1, sheet.max_column + 1):
+            letter = get_column_letter(col)
+            max_len = max(len(str(sheet.cell(row=row, column=col).value or "")) for row in range(1, sheet.max_row + 1))
+            sheet.column_dimensions[letter].width = min(max(max_len + 2, 12), 42)
 
-    sheet.freeze_panes = "A3"
-    save_workbook_safely(workbook, output_path)
+        sheet.freeze_panes = "A3"
+    save_workbook_safely(workbook, output_path, expected_digest)
 
 
 def next_email_id() -> int:
@@ -1881,6 +1938,8 @@ def create_event_excel(event_name: str) -> Path:
     suggested = suggested_event_workbook_path(event_name, matching_rows)
     if suggested.resolve() == xlsx_path().resolve():
         raise ValueError("El Excel del evento coincide con el global")
+    if suggested.exists():
+        raise ValueError(f"Ya existe {suggested.name}. Usa Elegir Excel para asignarlo.")
     if not write_nn_excel(matching_rows, suggested, event_name):
         write_basic_excel(matching_rows, suggested, event_name)
     assign_event_excel(event_name, suggested)

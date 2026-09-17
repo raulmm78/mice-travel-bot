@@ -13,6 +13,8 @@ from process_emails import (
     is_travel_request_email,
     write_basic_excel,
     write_nn_excel,
+    workbook_digest,
+    save_workbook_safely,
 )
 import process_emails
 
@@ -80,6 +82,7 @@ def test_nn_append() -> None:
         sheet["O4"] = "11111111H"
         sheet["U4"] = "antiguo@example.com"
         sheet["X4"] = date(2026, 9, 28)
+        sheet["AQ5"] = "NOTA MANUAL"
         workbook.save(path)
 
         os.environ["NN_TEMPLATE_PATH"] = str(path)
@@ -91,9 +94,39 @@ def test_nn_append() -> None:
         sheet = load_workbook(path)["Totales"]
         assert_true(sheet["M4"].value == "ANTIGUO", "La fila antigua ha cambiado")
         assert_true(sheet["O4"].value == "11111111H", "El DNI antiguo ha cambiado")
-        assert_true(sheet["M5"].value == "NUEVO", "No se ha anadido la fila nueva")
-        assert_true(sheet["O5"].value == "22222222J", "El DNI nuevo no esta en la fila esperada")
-        assert_true(sheet["O6"].value in (None, ""), "Se ha duplicado la fila nueva")
+        assert_true(sheet["AQ5"].value == "NOTA MANUAL", "Se ha borrado una celda manual")
+        assert_true(sheet["M6"].value == "NUEVO", "No se ha anadido la fila nueva debajo")
+        assert_true(sheet["O6"].value == "22222222J", "El DNI nuevo no esta en la fila esperada")
+        assert_true(sheet["O7"].value in (None, ""), "Se ha duplicado la fila nueva")
+        backups = list((path.parent / "_bot_backups").glob("*.xlsx"))
+        assert_true(len(backups) == 1, "Falta la copia del Excel anterior")
+        assert_true(load_workbook(backups[0])["Totales"]["AQ5"].value == "NOTA MANUAL",
+                    "La copia de seguridad no conserva la nota manual")
+
+
+def test_conflict_stops_before_replace() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "original.xlsx"
+        old_book = Workbook()
+        old_book.active["A1"] = "ORIGINAL"
+        old_book.save(path)
+        original_digest = workbook_digest(path)
+        new_book = Workbook()
+        new_book.active["A1"] = "CAMBIO"
+        try:
+            save_workbook_safely(new_book, path, "digest-desactualizado")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("No se detuvo el guardado ante un cambio concurrente")
+        assert_true(workbook_digest(path) == original_digest, "El conflicto modifico el Excel")
+        try:
+            save_workbook_safely(new_book, path)
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError("Crear Excel sustituyo un archivo ya existente")
+        assert_true(workbook_digest(path) == original_digest, "Crear Excel modifico un archivo existente")
 
 
 def test_global_and_event_flow() -> None:
@@ -148,6 +181,7 @@ def main() -> None:
     test_filter()
     test_basic_append()
     test_nn_append()
+    test_conflict_stops_before_replace()
     test_global_and_event_flow()
     print("OK - Seguridad Excel verificada")
     print("- Filtra correos que no son formulario")

@@ -112,6 +112,8 @@ Comprueba que:
 - No se duplica la misma solicitud al repetir el proceso.
 - Los Excel existentes, tanto el global como los de evento, conservan sus filas.
 - Los eventos nuevos esperan a que pulses `Elegir Excel` o `Crear Excel` en el panel.
+- Antes de actualizar un Excel existente, el bot guarda una copia en `_bot_backups` junto al archivo.
+- Si el Excel cambia durante el proceso, el bot detiene ese guardado y deja el archivo original intacto.
 
 ## Recomendacion para varios ordenadores
 

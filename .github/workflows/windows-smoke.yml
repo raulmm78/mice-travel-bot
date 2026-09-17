@@ -54,6 +54,9 @@ jobs:
       - name: Compile Python
         run: python -m py_compile app/process_emails.py app/update_before_start.py
 
+      - name: Verify Excel preservation
+        run: python app/safety_test.py
+
       - name: Run local processing smoke test
         shell: pwsh
         run: |
