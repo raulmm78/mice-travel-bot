@@ -40,6 +40,7 @@ APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 EMAIL_DIR = PROJECT_DIR / "data" / "emails"
 ASSETS_DIR = APP_DIR / "assets"
+BUNDLED_NN_TEMPLATE_PATH = ASSETS_DIR / "plantilla_nn_2026_09_17.xlsx"
 ENV_PATH = PROJECT_DIR / "config" / ".env"
 LEGACY_ENV_PATH = PROJECT_DIR / ".env"
 DEFAULT_OUTPUT_DIR = PROJECT_DIR / "data" / "outputs"
@@ -900,11 +901,21 @@ def extract_request_auto(path: Path, use_openai: bool) -> TravelRequest:
 def nn_template_path() -> Path | None:
     configured = os.getenv("NN_TEMPLATE_PATH", "").strip()
     candidates = [Path(configured)] if configured else []
+    candidates.append(BUNDLED_NN_TEMPLATE_PATH)
     candidates.append(DEFAULT_NN_TEMPLATE_PATH)
     for candidate in candidates:
-        if candidate and candidate.exists():
+        if candidate and candidate.suffix.lower() == ".xlsx" and candidate.exists():
             return candidate
     return None
+
+
+def event_template_path() -> Path | None:
+    configured = os.getenv("EVENT_TEMPLATE_PATH", "").strip()
+    if configured:
+        candidate = Path(configured)
+        if candidate.suffix.lower() == ".xlsx" and candidate.exists():
+            return candidate
+    return BUNDLED_NN_TEMPLATE_PATH if BUNDLED_NN_TEMPLATE_PATH.exists() else None
 
 
 def copy_row_style(sheet, source_row: int, target_row: int, max_col: int) -> None:
@@ -1112,6 +1123,19 @@ def nn_existing_row_keys(sheet) -> set[str]:
 
 
 def nn_next_append_row(sheet) -> int:
+    if sheet.title == "Listado":
+        # Las formulas y listas auxiliares ocupan filas que aun no tienen asistentes.
+        for row_num in range(sheet.max_row, 3, -1):
+            if any(
+                cell.data_type != "f"
+                and cell.value is not None
+                and str(cell.value).strip()
+                for row in sheet.iter_rows(min_row=row_num, max_row=row_num, min_col=2, max_col=110)
+                for cell in row
+                if cell.column != 61  # BI contiene ceros de la plantilla.
+            ):
+                return row_num + 1
+        return 4
     for row_num in range(sheet.max_row, 3, -1):
         if any(cell.value not in (None, "") for cell in sheet[row_num]):
             return row_num + 1
@@ -1120,9 +1144,10 @@ def nn_next_append_row(sheet) -> int:
 
 def write_nn_row(sheet, row_num: int, item: TravelRequest) -> None:
     max_col = sheet.max_column
-    copy_row_style(sheet, 4, row_num, max_col)
+    is_listado = sheet.title == "Listado"
+    if not is_listado:
+        copy_row_style(sheet, 4, row_num, max_col)
     values = {
-        "A": row_num - 3,
         "B": billing_month(item.fecha_viaje),
         "D": excel_text(item.evento),
         "E": item.delegado_rma,
@@ -1139,32 +1164,62 @@ def write_nn_row(sheet, row_num: int, item: TravelRequest) -> None:
         "V": item.telefono,
         "W": excel_text(item.origen),
         "X": parse_iso_date(item.fecha_viaje),
-        "AA": excel_text(item.conex_ida),
-        "AB": excel_text(item.desplazamientos_ida),
-        "AC": excel_text(item.desplazamientos_vuelta),
-        "AD": excel_text(item.conex_regreso),
-        "AE": excel_text(item.hotel),
-        "AF": parse_iso_date(item.hotel_in),
-        "AG": parse_iso_date(item.hotel_out),
-        "AH": excel_text(item.inscripcion),
-        "AI": excel_text(item.socio),
-        "AO": excel_text(item.restricciones_alimentarias),
-        "AR": excel_text(item.observaciones),
     }
+    if is_listado:
+        values.update({
+            "Y": excel_text(item.conex_ida),
+            "Z": excel_text(item.desplazamientos_ida),
+            "AA": excel_text(item.desplazamientos_vuelta),
+            "AB": excel_text(item.conex_regreso),
+            "AC": excel_text(item.hotel),
+            "AD": parse_iso_date(item.hotel_in),
+            "AE": parse_iso_date(item.hotel_out),
+            "AG": excel_text(item.inscripcion),
+            "AH": excel_text(item.socio),
+            "AN": excel_text(item.restricciones_alimentarias),
+            "AQ": excel_text(item.observaciones),
+        })
+    else:
+        values.update({
+            "A": row_num - 3,
+            "AA": excel_text(item.conex_ida),
+            "AB": excel_text(item.desplazamientos_ida),
+            "AC": excel_text(item.desplazamientos_vuelta),
+            "AD": excel_text(item.conex_regreso),
+            "AE": excel_text(item.hotel),
+            "AF": parse_iso_date(item.hotel_in),
+            "AG": parse_iso_date(item.hotel_out),
+            "AH": excel_text(item.inscripcion),
+            "AI": excel_text(item.socio),
+            "AO": excel_text(item.restricciones_alimentarias),
+            "AR": excel_text(item.observaciones),
+        })
     for column, value in values.items():
         sheet[f"{column}{row_num}"] = value
 
     sheet[f"B{row_num}"].number_format = EXCEL_MONTH_FORMAT
-    for date_column in ("X", "AF", "AG"):
+    for date_column in (("X", "AD", "AE") if is_listado else ("X", "AF", "AG")):
         sheet[f"{date_column}{row_num}"].number_format = EXCEL_DATE_FORMAT
     has_dietary_restriction = item.restricciones_alimentarias.strip().lower() not in {"", "no", "ninguna", "ninguno"}
-    apply_bot_added_font(sheet, row_num, max_col, has_dietary_restriction)
-    sheet[f"AR{row_num}"].alignment = Alignment(wrap_text=True, vertical="top")
-    sheet.row_dimensions[row_num].height = 44
+    if is_listado:
+        for column, value in values.items():
+            if value not in (None, ""):
+                sheet[f"{column}{row_num}"].font = Font(
+                    name="Calibri", size=10, color=BOT_ADDED_FONT_COLOR,
+                    bold=column == "AN" and has_dietary_restriction,
+                )
+        sheet[f"AQ{row_num}"].alignment = Alignment(wrap_text=True, vertical="top")
+    else:
+        apply_bot_added_font(sheet, row_num, max_col, has_dietary_restriction)
+        sheet[f"AR{row_num}"].alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.row_dimensions[row_num].height = 44
 
 
-def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, title: str | None = None) -> bool:
-    template = nn_template_path()
+def write_nn_excel(
+    rows: list[TravelRequest], output_path: Path | None = None,
+    title: str | None = None, template_path: Path | None = None,
+) -> bool:
+    template = template_path or nn_template_path()
     if not template:
         return False
 
@@ -1175,19 +1230,28 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
     exists = output_path.exists()
     expected_digest = workbook_digest(output_path) if exists else None
     workbook = load_workbook(output_path if exists else template)
-    if exists and "Totales" not in workbook.sheetnames:
-        raise ValueError(f"El Excel existente no tiene hoja Totales: {output_path}")
-    sheet = workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
+    if exists and not ({"Totales", "Listado"} & set(workbook.sheetnames)):
+        raise ValueError(f"El Excel existente no tiene hoja de listado reconocida: {output_path}")
+    sheet = workbook["Listado"] if "Listado" in workbook.sheetnames else (
+        workbook["Totales"] if "Totales" in workbook.sheetnames else workbook.active
+    )
+    is_listado = sheet.title == "Listado"
+    if is_listado and any(sheet[f"{column}3"].value != label for column, label in {
+        "M": "NOMBRE", "N": "APELLIDOS", "O": "DNI", "X": "FECHA INICIO SERVICIO",
+        "AN": "ALERGIAS", "AQ": "OBSERVACIONES",
+    }.items()):
+        raise ValueError(f"La hoja Listado no coincide con la plantilla NN esperada: {output_path}")
     if not exists:
-        sheet.title = "Totales"
-        for row in sheet.iter_rows(min_row=4):
-            for cell in row:
-                if cell.value is not None and cell.data_type != "f":
-                    cell.value = None
-        sheet.conditional_formatting._cf_rules.clear()
-        sheet.sheet_view.showGridLines = False
-        sheet.freeze_panes = "A4"
-        sheet.auto_filter.ref = "A3:DP3"
+        if not is_listado:
+            sheet.title = "Totales"
+            for row in sheet.iter_rows(min_row=4):
+                for cell in row:
+                    if cell.value is not None and cell.data_type != "f":
+                        cell.value = None
+            sheet.conditional_formatting._cf_rules.clear()
+            sheet.sheet_view.showGridLines = False
+            sheet.freeze_panes = "A4"
+            sheet.auto_filter.ref = "A3:DP3"
         sheet["A2"] = excel_text(title or "LISTADO GLOBAL")
 
     max_col = sheet.max_column
@@ -1199,6 +1263,8 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         key = row_dedupe_key(item)
         if key in existing_keys or key in batch_keys:
             continue
+        if is_listado and next_row > sheet.max_row:
+            raise ValueError(f"La plantilla NN no tiene mas filas preparadas: {output_path}")
         write_nn_row(sheet, next_row, item)
         existing_keys.add(key)
         batch_keys.add(key)
@@ -1236,7 +1302,7 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         "AO": 18,
         "AR": 70,
     }
-    if not exists:
+    if not exists and not is_listado:
         for column, width in widths.items():
             sheet.column_dimensions[column].width = width
         apply_nn_row_banding(sheet, max_col, 4, max(40, sheet.max_row))
@@ -1272,7 +1338,11 @@ def write_outputs(rows: list[TravelRequest]) -> None:
             remember_pending_event(event_name, event_rows)
             route = load_event_routes().get(event_key(event_name), {})
             if route.get("status") == "assigned":
-                write_nn_excel(event_rows, Path(route["excel_path"]), event_name)
+                event_path = Path(route["excel_path"])
+                event_template = event_template_path()
+                if not event_path.exists() and not event_template:
+                    raise ValueError("Falta la plantilla NN de eventos. Instala el ZIP de plantilla antes de crear listados.")
+                write_nn_excel(event_rows, event_path, event_name, event_template)
         return
 
     write_basic_excel(rows, xlsx_path(), "LISTADO GLOBAL")
@@ -1915,6 +1985,7 @@ def choose_template_excel() -> Path | None:
     if not chosen:
         return None
     set_env_value("NN_TEMPLATE_PATH", str(chosen))
+    set_env_value("EVENT_TEMPLATE_PATH", str(chosen))
     process_all()
     log_event(f"Plantilla Excel configurada: {chosen}")
     return chosen
@@ -1948,7 +2019,10 @@ def create_event_excel(event_name: str) -> Path:
         raise ValueError("El Excel del evento coincide con el global")
     if suggested.exists():
         raise ValueError(f"Ya existe {suggested.name}. Usa Elegir Excel para asignarlo.")
-    if not write_nn_excel(matching_rows, suggested, event_name):
+    template = event_template_path()
+    if not template:
+        raise ValueError("Falta la plantilla NN de eventos. Instala el ZIP de plantilla antes de crear listados.")
+    if not write_nn_excel(matching_rows, suggested, event_name, template):
         write_basic_excel(matching_rows, suggested, event_name)
     assign_event_excel(event_name, suggested)
     return suggested
@@ -2689,7 +2763,9 @@ def diagnose_environment() -> int:
             checks.append(diagnostic_line("Conexion IMAP", False, str(exc)))
 
     template = nn_template_path()
-    checks.append(diagnostic_line("Plantilla Excel", bool(template), str(template or "no encontrada")))
+    checks.append(diagnostic_line("Plantilla global", bool(template), str(template or "no encontrada")))
+    event_template = event_template_path()
+    checks.append(diagnostic_line("Plantilla eventos", bool(event_template), str(event_template or "no encontrada")))
 
     output_ok, output_detail = check_path_writable(output_dir(), is_dir=True)
     checks.append(diagnostic_line("Carpeta global escribible", output_ok, output_detail))

@@ -118,6 +118,7 @@ EVENT_OUTPUT_DIR=
 EVENT_ROUTES_PATH=
 PROCESSED_IDS_PATH=
 NN_TEMPLATE_PATH=
+EVENT_TEMPLATE_PATH=
 WATCH_INTERVAL_SECONDS=300
 ```
 
@@ -138,7 +139,7 @@ NN_TEMPLATE_PATH=C:\Users\Usuario\OneDrive - MICE TRAVEL\Plantillas\LISTADO PARA
 
 ## Excel por evento
 
-Cuando llega un evento nuevo, el bot agrupa por `NOMBRE EVENTO/CONGRESO/CURSO` y crea un Excel sugerido automaticamente. Ademas lo muestra en el panel como `Eventos nuevos`, para confirmar con el boton `Elegir Excel` si ese evento debe ir a ese archivo u otro.
+Cuando llega un evento nuevo, el bot lo muestra en el panel como `Eventos nuevos`. `Crear Excel` usa la plantilla NN del 17 de septiembre instalada localmente desde el ZIP privado; `Elegir Excel` permite usar uno ya existente. La plantilla `.xls` original se convirtio una vez a `.xlsx` para que el bot pueda abrirla en Windows sin instalar LibreOffice. El archivo del cliente no se publica en GitHub.
 
 Formato del nombre:
 

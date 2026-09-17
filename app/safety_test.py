@@ -7,6 +7,9 @@ from datetime import date
 from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.formatting.rule import CellIsRule
+from openpyxl.styles import Border, PatternFill, Side
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from process_emails import (
     TravelRequest,
@@ -135,6 +138,7 @@ def test_global_and_event_flow() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         template = root / "plantilla.xlsx"
+        event_template = root / "plantilla_eventos.xlsx"
         global_path = root / "global.xlsx"
         events = root / "eventos"
         events.mkdir()
@@ -144,13 +148,38 @@ def test_global_and_event_flow() -> None:
         workbook.active["O4"] = "99999999R"
         workbook.save(template)
         template_digest = workbook_digest(template)
+        event_book = Workbook()
+        event_sheet = event_book.active
+        event_sheet.title = "Listado"
+        event_book.create_sheet("Condiciones")
+        for column, label in {
+            "M": "NOMBRE", "N": "APELLIDOS", "O": "DNI", "X": "FECHA INICIO SERVICIO",
+            "AN": "ALERGIAS", "AQ": "OBSERVACIONES",
+        }.items():
+            event_sheet[f"{column}3"] = label
+        event_sheet["A4"] = 1
+        for row_num in range(4, 8):
+            event_sheet[f"BE{row_num}"] = f"=SUM(AR{row_num}:BD{row_num})"
+        event_sheet["BI5"] = 0
+        event_sheet["DM4"] = "AIR ALGERIE"
+        event_sheet["M4"].border = Border(left=Side(style="thin"))
+        event_sheet["M4"].fill = PatternFill("solid", fgColor="FFFFFF")
+        validation = DataValidation(type="list", formula1='"A,B"')
+        event_sheet.add_data_validation(validation)
+        validation.add("M4:M7")
+        event_sheet.conditional_formatting.add("M4:M7", CellIsRule(operator="equal", formula=["0"]))
+        event_book.save(event_template)
         old = request("ANTIGUO", "11111111H", "old")
         new = request("NUEVO", "22222222J", "new")
         other = request("OTRO", "33333333P", "other")
         other.evento = "Congreso EULAR"
+        other.conex_ida = "DIRECTO"
+        other.hotel_in = "2026-09-28"
+        other.restricciones_alimentarias = "SIN LACTOSA"
         existing_event = events / "NO ENVIAR -----LISTADO CONGRESO IMS 28 SEP.xlsx"
         env = {
             "NN_TEMPLATE_PATH": str(template),
+            "EVENT_TEMPLATE_PATH": str(event_template),
             "OUTPUT_DIR": str(root),
             "XLSX_PATH": str(global_path),
             "EVENT_OUTPUT_DIR": str(events),
@@ -175,16 +204,60 @@ def test_global_and_event_flow() -> None:
                 created = process_emails.create_event_excel("Congreso EULAR")
             assert_true(created == suggested and created.exists(), "No se ha creado el Excel sugerido")
             process_emails.write_outputs([old, new, other])
+            next_attendee = request("CUARTO", "44444444L", "fourth")
+            next_attendee.evento = "Congreso EULAR"
+            process_emails.write_nn_excel([other, next_attendee], suggested, "Congreso EULAR",
+                                          process_emails.event_template_path())
 
         global_sheet = load_workbook(global_path)["Totales"]
         event_sheet = load_workbook(existing_event)["Totales"]
-        new_sheet = load_workbook(suggested)["Totales"]
+        new_book = load_workbook(suggested)
+        new_sheet = new_book["Listado"]
+        source_sheet = load_workbook(event_template)["Listado"]
         assert_true([global_sheet[f"O{row}"].value for row in (4, 5, 6)] ==
                     ["11111111H", "22222222J", "33333333P"], "El global perdio o duplico filas")
         assert_true([event_sheet[f"O{row}"].value for row in (4, 5)] ==
                     ["11111111H", "22222222J"], "El Excel de evento perdio o duplico filas")
-        assert_true(new_sheet["O4"].value == "33333333P" and new_sheet["O5"].value is None,
-                    "El evento nuevo se ha duplicado")
+        assert_true(new_sheet["O4"].value == "33333333P" and new_sheet["O5"].value == "44444444L"
+                    and new_sheet["O6"].value is None, "El evento nuevo no anade debajo sin duplicar")
+        assert_true(new_sheet["Y4"].value == "DIRECTO", "La conexion de ida fue a otra columna")
+        assert_true(new_sheet["AD4"].value is not None, "La fecha de entrada del hotel no esta en IN")
+        assert_true(new_sheet["AN4"].value == "SIN LACTOSA", "La alergia no esta en su columna")
+        assert_true(new_sheet["BE4"].value == source_sheet["BE4"].value,
+                    "Se ha perdido una formula de la plantilla")
+        assert_true(new_sheet["DM4"].value == source_sheet["DM4"].value,
+                    "Se ha perdido la lista auxiliar de la plantilla")
+        assert_true(new_sheet["M4"].fill.patternType == source_sheet["M4"].fill.patternType
+                    and new_sheet["M4"].border.left.style == source_sheet["M4"].border.left.style,
+                    "Se ha cambiado el formato base de la plantilla")
+        assert_true("Condiciones" in new_book.sheetnames, "Falta una hoja de la plantilla")
+        assert_true(len(new_sheet.data_validations.dataValidation) == len(source_sheet.data_validations.dataValidation),
+                    "Se han perdido validaciones de la plantilla")
+        assert_true(len(new_sheet.conditional_formatting) == len(source_sheet.conditional_formatting),
+                    "Se han perdido formatos condicionales de la plantilla")
+
+
+def test_supplied_template_when_available() -> None:
+    template = process_emails.BUNDLED_NN_TEMPLATE_PATH
+    if not template.exists():
+        return
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "nuevo_evento.xlsx"
+        attendee = request("CLIENTE", "55555555M", "supplied")
+        attendee.conex_ida = "DIRECTO"
+        attendee.restricciones_alimentarias = "SIN GLUTEN"
+        write_nn_excel([attendee], path, "Congreso IMS", template)
+        source = load_workbook(template)["Listado"]
+        output = load_workbook(path)
+        sheet = output["Listado"]
+        assert_true(sheet["O4"].value == "55555555M", "La plantilla real no usa la primera fila")
+        assert_true(sheet["Y4"].value == "DIRECTO" and sheet["AN4"].value == "SIN GLUTEN",
+                    "La plantilla real tiene columnas desalineadas")
+        assert_true(sheet["BE4"].value == source["BE4"].value, "La plantilla real perdio formulas")
+        assert_true(sheet["DM4"].value == source["DM4"].value, "La plantilla real perdio listas")
+        assert_true(len(sheet.conditional_formatting) == len(source.conditional_formatting),
+                    "La plantilla real perdio formato condicional")
+        assert_true("Condiciones" in output.sheetnames, "La plantilla real perdio hojas")
 
 
 def main() -> None:
@@ -193,6 +266,7 @@ def main() -> None:
     test_nn_append()
     test_conflict_stops_before_replace()
     test_global_and_event_flow()
+    test_supplied_template_when_available()
     print("OK - Seguridad Excel verificada")
     print("- Filtra correos que no son formulario")
     print("- Acepta reenvios RV/FW si contienen el formulario")

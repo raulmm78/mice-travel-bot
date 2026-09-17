@@ -69,6 +69,7 @@ OUTPUT_DIR=
 EVENT_OUTPUT_DIR=
 PROCESSED_IDS_PATH=
 NN_TEMPLATE_PATH=
+EVENT_TEMPLATE_PATH=
 WATCH_INTERVAL_SECONDS=300
 ```
 
@@ -126,6 +127,7 @@ Comprueba que:
 - No se duplica la misma solicitud al repetir el proceso.
 - Los Excel existentes, tanto el global como los de evento, conservan sus filas.
 - Los eventos nuevos esperan a que pulses `Elegir Excel` o `Crear Excel` en el panel.
+- `Crear Excel` usa por defecto la plantilla NN del 17 de septiembre instalada localmente con el ZIP privado `MICE_Travel_Bot_PLANTILLA_NN_Windows_*.zip`. Es una copia `.xlsx` convertida del `.xls` facilitado por el cliente; el original de OneDrive no se modifica ni se publica en GitHub. Extrae el ZIP y ejecuta `INSTALAR_PLANTILLA_NN_windows.bat` una sola vez. `EVENT_TEMPLATE_PATH` permite seleccionar otra plantilla `.xlsx` mas adelante.
 - Antes de actualizar un Excel existente, el bot guarda una copia en `_bot_backups` junto al archivo.
 - Si el Excel cambia durante el proceso, el bot detiene ese guardado y deja el archivo original intacto.
 

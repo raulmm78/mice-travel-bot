@@ -25,6 +25,7 @@ def main() -> None:
             prefix = "mice-travel-bot-version/"
             archive.writestr(prefix + "app/process_emails.py", "version nueva")
             archive.writestr(prefix + "app/update_before_start.py", "actualizador nuevo")
+            archive.writestr(prefix + "app/assets/plantilla_nn_2026_09_17.xlsx", b"plantilla-convertida")
             archive.writestr(prefix + "config/.env", "CLAVE_PRIVADA=robada\n")
             archive.writestr(prefix + "data/listado.xlsx", b"excel-borrado")
 
@@ -42,6 +43,7 @@ def main() -> None:
             updater.update_zip_installation()
 
         assert (root / "app" / "process_emails.py").read_text(encoding="utf-8") == "version nueva"
+        assert not (root / "app" / "assets" / "plantilla_nn_2026_09_17.xlsx").exists()
         assert (root / "config" / ".env").read_text(encoding="utf-8") == "CLAVE_PRIVADA=sin_cambios\n"
         assert (root / "data" / "listado.xlsx").read_bytes() == b"excel-sin-cambios"
         assert (root / "config" / ".github_commit").read_text(encoding="ascii").strip() == sha
