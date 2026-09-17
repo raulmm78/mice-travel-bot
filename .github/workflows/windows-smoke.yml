@@ -114,3 +114,22 @@ jobs:
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
+
+      - name: Test local v2 repair on Windows
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "TEST_BOT"
+          $repair = Join-Path $root "MICE TRAVEL BOT v2 REPARAR"
+          $install = Join-Path $root "MICE Travel Bot_windows_con_claves_20260913\MICE Travel Bot"
+          New-Item -ItemType Directory -Force -Path $repair, (Join-Path $install "app") | Out-Null
+          Copy-Item "platform\windows\reparar_v2.ps1" (Join-Path $repair "reparar_v2.ps1")
+          Copy-Item "app\process_emails.py" (Join-Path $repair "process_emails.py")
+          Copy-Item "abrir_panel_windows.bat" (Join-Path $repair "abrir_panel_windows.bat")
+          Set-Content (Join-Path $install "app\process_emails.py") "APP_VERSION = 'v1'"
+          Set-Content (Join-Path $install "abrir_panel_windows.bat") "@echo off"
+          python -m venv --system-site-packages (Join-Path $install ".venv")
+          & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repair "reparar_v2.ps1")
+          if ($LASTEXITCODE -ne 0) { throw "Fallo la reparacion local" }
+          if (-not (Select-String (Join-Path $install "app\process_emails.py") -Pattern 'APP_VERSION = "v2"' -Quiet)) {
+            throw "La reparacion no instalo v2"
+          }
