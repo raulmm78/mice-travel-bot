@@ -25,6 +25,12 @@ function Get-PortableHash([string]$path) {
 
 "Instalacion v3 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Set-Content -Path $log -Encoding UTF8
 try {
+    $listeningBotPorts = 8765..8784 | Where-Object {
+        Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue
+    }
+    if ($listeningBotPorts) {
+        throw "El panel sigue abierto. Cierra MICE Travel Bot antes de instalar v3."
+    }
     if (-not (Test-Path $codeTarget) -or -not (Test-Path $launcherTarget)) {
         throw "No encuentro la instalacion del bot en $install"
     }
