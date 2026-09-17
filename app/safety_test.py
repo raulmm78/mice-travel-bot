@@ -319,8 +319,32 @@ def test_sparse_formatted_rows_append_position() -> None:
     assert_true(len(sheet._cells) == before, "Buscar la siguiente fila creo celdas vacias")
     assert_true(time.monotonic() - start < 3, "Buscar la siguiente fila tarda demasiado")
     sheet["AR42"] = "TOTAL"
-    assert_true(process_emails.nn_next_append_row(sheet) == 43,
-                "La nueva solicitud podria sobrescribir una fila de la plantilla")
+    assert_true(process_emails.nn_next_append_row(sheet) == 6,
+                "No se eligio el primer hueco libre antes de los totales")
+
+
+def test_nn_uses_each_free_row_without_overwriting() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "global.xlsx"
+        template = Path(temp) / "template.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Totales"
+        sheet["O4"] = "11111111H"
+        sheet["AQ5"] = "NOTA MANUAL"
+        sheet["U7"] = "mailto:conservar@example.com"
+        sheet["AH42"] = "=SUM(AH4:AH40)"
+        workbook.save(path)
+        workbook.save(template)
+        first = request("PRIMERO", "22222222J", "first-free")
+        second = request("SEGUNDO", "33333333P", "second-free")
+        write_nn_excel([first, second], path, "GLOBAL", template)
+        result = load_workbook(path)["Totales"]
+        assert_true(result["O6"].value == "22222222J", "No uso el primer hueco libre")
+        assert_true(result["O8"].value == "33333333P", "La segunda fila piso datos existentes")
+        assert_true(result["AQ5"].value == "NOTA MANUAL", "Se borro una nota")
+        assert_true(result["U7"].value == "mailto:conservar@example.com", "Se borro un correo")
+        assert_true(result["AH42"].value == "=SUM(AH4:AH40)", "Se borro una formula")
 
 
 def test_conflict_stops_before_replace() -> None:
@@ -486,6 +510,7 @@ def main() -> None:
     test_basic_append()
     test_nn_append()
     test_sparse_formatted_rows_append_position()
+    test_nn_uses_each_free_row_without_overwriting()
     test_conflict_stops_before_replace()
     test_global_and_event_flow()
     test_supplied_template_when_available()
