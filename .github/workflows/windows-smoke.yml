@@ -67,6 +67,8 @@ jobs:
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("activar_actualizaciones_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+          [System.Management.Automation.Language.Parser]::ParseFile("instalar_plantilla_nn_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw ($errors | Out-String) }
 
       - name: Run local processing smoke test
         shell: pwsh
