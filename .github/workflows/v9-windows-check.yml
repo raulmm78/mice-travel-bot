@@ -26,6 +26,8 @@ jobs:
           }
       - name: Test extraction, buttons and Excel preservation
         run: python app/safety_test.py
+      - name: Test standalone production mailbox checker
+        run: python app/production_mail_test.py
       - name: Reproduce client update with open panel
         shell: pwsh
         run: |
