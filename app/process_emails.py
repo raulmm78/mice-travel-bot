@@ -1169,6 +1169,8 @@ def write_nn_excel(rows: list[TravelRequest], output_path: Path | None = None, t
         return False
 
     output_path = output_path or xlsx_path()
+    if output_path.resolve() == template.resolve():
+        raise ValueError("La plantilla Excel no puede usarse como destino de escritura")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     exists = output_path.exists()
     expected_digest = workbook_digest(output_path) if exists else None
@@ -1898,6 +1900,9 @@ def choose_global_excel() -> Path | None:
         return None
     if chosen.suffix.lower() != ".xlsx":
         chosen = chosen.with_suffix(".xlsx")
+    template = nn_template_path()
+    if template and chosen.resolve() == template.resolve():
+        raise ValueError("La plantilla Excel no puede elegirse como Excel global")
     set_env_value("XLSX_PATH", str(chosen))
     set_env_value("OUTPUT_DIR", str(chosen.parent))
     process_all()
@@ -1925,6 +1930,9 @@ def choose_event_excel(event_name: str) -> Path | None:
         chosen = chosen.with_suffix(".xlsx")
     if chosen.resolve() == xlsx_path().resolve():
         raise ValueError("El Excel del evento no puede ser el Excel global")
+    template = nn_template_path()
+    if template and chosen.resolve() == template.resolve():
+        raise ValueError("La plantilla Excel no puede elegirse como Excel de evento")
     assign_event_excel(event_name, chosen)
     process_all()
     return chosen

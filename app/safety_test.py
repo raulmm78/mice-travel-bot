@@ -71,6 +71,7 @@ def test_basic_append() -> None:
 def test_nn_append() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "existing.xlsx"
+        template_path = Path(temp) / "template.xlsx"
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Totales"
@@ -84,8 +85,9 @@ def test_nn_append() -> None:
         sheet["X4"] = date(2026, 9, 28)
         sheet["AQ5"] = "NOTA MANUAL"
         workbook.save(path)
+        workbook.save(template_path)
 
-        os.environ["NN_TEMPLATE_PATH"] = str(path)
+        os.environ["NN_TEMPLATE_PATH"] = str(template_path)
         old = request("ANTIGUO", "11111111H", "old")
         new = request("NUEVO", "22222222J", "new")
         write_nn_excel([old, new], path, "TEST")
@@ -141,6 +143,7 @@ def test_global_and_event_flow() -> None:
         workbook.active["M4"] = "PERSONA DE PLANTILLA"
         workbook.active["O4"] = "99999999R"
         workbook.save(template)
+        template_digest = workbook_digest(template)
         old = request("ANTIGUO", "11111111H", "old")
         new = request("NUEVO", "22222222J", "new")
         other = request("OTRO", "33333333P", "other")
@@ -154,10 +157,17 @@ def test_global_and_event_flow() -> None:
             "EVENT_ROUTES_PATH": str(root / "routes.json"),
         }
         with patch.dict(os.environ, env):
+            try:
+                write_nn_excel([request("ERROR", "88888888Q")], template, "NO DEBE ESCRIBIR")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Se permitio escribir sobre la plantilla")
             write_nn_excel([old], global_path, "GLOBAL")
             write_nn_excel([old], existing_event, "Congreso IMS")
             process_emails.assign_event_excel("Congreso IMS", existing_event)
             process_emails.write_outputs([old, new, other])
+            assert_true(workbook_digest(template) == template_digest, "La plantilla ha cambiado")
             assert_true(existing_event.exists(), "Se ha eliminado el Excel de evento")
             suggested = process_emails.suggested_event_workbook_path("Congreso EULAR", [other])
             assert_true(not suggested.exists(), "Se ha creado un Excel antes de confirmar el evento")
