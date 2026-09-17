@@ -138,6 +138,17 @@ def test_event_buttons_do_not_reprocess_all_mail() -> None:
 def test_event_buttons_over_http() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
+        template = root / "template.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Listado"
+        for column, label in {
+            "M": "NOMBRE", "N": "APELLIDOS", "O": "DNI",
+            "X": "FECHA INICIO SERVICIO", "AN": "ALERGIAS", "AQ": "OBSERVACIONES",
+        }.items():
+            sheet[f"{column}3"] = label
+        sheet["AQ10"].fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+        workbook.save(template)
         destination = root / "destino"
         destination.mkdir()
         global_path = root / "global.xlsx"
@@ -146,7 +157,10 @@ def test_event_buttons_over_http() -> None:
         first.evento = "Congreso ADA"
         second = request("LUIS", "22222222J", "second")
         second.evento = "Congreso EASD"
-        environment = patch.dict(os.environ, {"EVENT_ROUTES_PATH": str(root / "routes.json")})
+        environment = patch.dict(os.environ, {
+            "EVENT_ROUTES_PATH": str(root / "routes.json"),
+            "EVENT_TEMPLATE_PATH": str(template),
+        })
         with environment, patch.object(process_emails, "rows_as_dicts", return_value=[first.__dict__, second.__dict__]), \
                 patch.object(process_emails, "event_output_root", return_value=root), \
                 patch.object(process_emails, "xlsx_path", return_value=global_path):
