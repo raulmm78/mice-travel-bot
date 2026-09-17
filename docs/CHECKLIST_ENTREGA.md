@@ -11,7 +11,7 @@
 ## En cada ordenador Windows
 
 1. Instalar Python 3.
-2. Instalar Git si se quiere autoactualizacion desde GitHub.
+2. Confirmar acceso a GitHub; las instalaciones desde ZIP se actualizan sin Git.
 3. Iniciar sesion en OneDrive y esperar a que sincronice.
 4. Descargar o clonar el proyecto.
 5. Ejecutar `instalar_windows.bat`.

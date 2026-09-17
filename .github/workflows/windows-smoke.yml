@@ -57,6 +57,9 @@ jobs:
       - name: Verify Excel preservation
         run: python app/safety_test.py
 
+      - name: Verify GitHub update without Git
+        run: python app/update_test.py
+
       - name: Run local processing smoke test
         shell: pwsh
         run: |

@@ -1,5 +1,6 @@
 .env
 config/.env
+config/.github_commit
 __pycache__/
 app/__pycache__/
 .venv/

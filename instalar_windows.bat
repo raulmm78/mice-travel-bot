@@ -91,18 +91,6 @@ if not %errorlevel%==0 (
   )
 )
 
-where git >nul 2>nul
-if not %errorlevel%==0 (
-  echo.
-  echo No se ha encontrado Git. Intentando instalar Git para las actualizaciones...
-  where winget >nul 2>nul
-  if %errorlevel%==0 (
-    winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
-  ) else (
-    echo No se ha podido instalar Git automaticamente. El bot funcionara, pero sin autoactualizacion desde GitHub.
-  )
-)
-
 echo Instalando dependencias...
 %PY% -m venv .venv
 set "PY=.venv\Scripts\python.exe"

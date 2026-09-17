@@ -11,6 +11,18 @@ Si usas el ZIP:
 
 No ejecutes `instalar_windows.bat` desde dentro del ZIP, porque Windows muestra los archivos como si estuvieran ahi pero el instalador no puede encontrar bien `app\requirements.txt`. Si el ZIP ya incluye `config/.env`, el instalador conserva esas claves y rutas.
 
+## Activar actualizaciones en un PC ya instalado desde ZIP antiguo
+
+El ZIP entregado antes de esta mejora no puede actualizarse solo porque su actualizador antiguo exigia Git. Una vez, en PowerShell del PC cliente:
+
+```powershell
+$script = Join-Path $env:TEMP "activar_actualizaciones_windows.ps1"
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/raulmm78/mice-travel-bot/main/activar_actualizaciones_windows.ps1" -OutFile $script
+powershell -NoProfile -ExecutionPolicy Bypass -File $script
+```
+
+El script localiza la instalacion mediante el acceso directo del escritorio y cambia solo `app/update_before_start.py`. Conserva `config/.env`, correos, registros y Excels. Cierra el panel y vuelve a abrir la app: descargara el codigo mas reciente desde GitHub. Desde ese momento no hace falta enviar mas ZIPs para actualizar el programa.
+
 ## Instalacion desde GitHub
 
 En cada PC Windows, abrir PowerShell y ejecutar:
@@ -68,7 +80,7 @@ MICE Travel Bot
 
 Al arrancar:
 
-1. Busca actualizaciones en GitHub.
+1. Busca actualizaciones en GitHub al abrir la app, sin necesitar Git en instalaciones desde ZIP.
 2. Si hay version nueva, la descarga.
 3. Abre el panel local.
 4. No reinicia el PC.
