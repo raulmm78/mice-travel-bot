@@ -1,4 +1,4 @@
-name: V6 Windows end-to-end
+name: V7 Windows end-to-end
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
       - name: Validate PowerShell syntax
         shell: pwsh
         run: |
-          foreach ($path in @("platform/windows/v6/preparar_v6.ps1", "platform/windows/v6/instalar_v6.ps1")) {
+          foreach ($path in @("platform/windows/v7/preparar_v7.ps1", "platform/windows/v7/instalar_v7.ps1")) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
@@ -31,13 +31,13 @@ jobs:
         run: |
           $root = Join-Path $env:RUNNER_TEMP "TEST_BOT"
           $install = Join-Path $root "MICE Travel Bot_windows_con_claves_20260913/MICE Travel Bot"
-          $update = Join-Path $root "_bot_v6"
+          $update = Join-Path $root "_bot_v7"
           $app = Join-Path $install "app"
           New-Item -ItemType Directory -Force -Path $app, $update, (Join-Path $install "config") | Out-Null
           Copy-Item app/process_emails.py (Join-Path $update "process_emails.py")
-          Copy-Item platform/windows/v6/preparar_v6.ps1 (Join-Path $update "preparar_v6.ps1")
-          Copy-Item platform/windows/v6/instalar_v6.ps1 (Join-Path $update "instalar_v6.ps1")
-          Copy-Item platform/windows/v6/abrir_panel_windows.bat (Join-Path $update "abrir_panel_windows.bat")
+          Copy-Item platform/windows/v7/preparar_v7.ps1 (Join-Path $update "preparar_v7.ps1")
+          Copy-Item platform/windows/v7/instalar_v7.ps1 (Join-Path $update "instalar_v7.ps1")
+          Copy-Item platform/windows/v7/abrir_panel_windows.bat (Join-Path $update "abrir_panel_windows.bat")
           Set-Content (Join-Path $install "abrir_panel_windows.bat") "@echo off" -Encoding Ascii
           Set-Content (Join-Path $install "config/.env") "TEST_ONLY=1" -Encoding Ascii
           @'
@@ -81,13 +81,13 @@ jobs:
             }
             if (-not $ready) { throw "No arranco el panel de prueba" }
 
-            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v6.ps1")
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v7.ps1")
             if ($LASTEXITCODE -eq 0) { throw "Cerro el bot mientras guardaba Excel" }
             if ($proc.HasExited) { throw "Se cerro el proceso durante la fase de guardado" }
             if ((Get-FileHash $excel).Hash -ne $excelHash) { throw "Modifico el Excel durante el intento fallido" }
 
             Set-Content (Join-Path $install "phase.txt") "Listo." -Encoding Ascii
-            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v6.ps1")
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v7.ps1")
             if ($LASTEXITCODE -ne 0) { throw "No actualizo el bot cuando estaba libre" }
             $proc.Refresh()
             if (-not $proc.HasExited) { throw "Dejo abierto el panel anterior" }
@@ -96,7 +96,7 @@ jobs:
               throw "Modifico la configuracion"
             }
             if ((Get-FileHash (Join-Path $app "process_emails.py")).Hash -ne (Get-FileHash (Join-Path $update "process_emails.py")).Hash) {
-              throw "No instalo el codigo v6"
+              throw "No instalo el codigo v7"
             }
             if (-not (Test-Path (Join-Path $install "_bot_backups_code"))) { throw "No guardo copia del codigo anterior" }
           } finally {

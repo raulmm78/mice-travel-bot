@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -84,7 +85,8 @@ def test_dashboard_checks_imap_before_on() -> None:
                 with patch.object(process_emails, "pending_event_routes", return_value=[]):
                     html = process_emails.dashboard_html()
     assert_true('id="powerButton"' in html and "disabled" in html, "ON no espera a la comprobacion IMAP")
-    assert_true("verifyImap();" in html and "MICE TRAVEL BOT v6" in html, "Falta la verificacion IMAP de v6")
+    assert_true("verifyImap();" in html and f"MICE TRAVEL BOT {process_emails.APP_VERSION}" in html,
+                "Falta la verificacion IMAP del panel")
 
 
 def test_ignored_event_stays_ignored_without_touching_excels() -> None:
@@ -304,6 +306,23 @@ def test_nn_append() -> None:
                     "La copia de seguridad no conserva la nota manual")
 
 
+def test_sparse_formatted_rows_append_position() -> None:
+    sheet = Workbook().active
+    sheet.title = "Totales"
+    sheet["O4"] = "11111111H"
+    sheet["AR5"] = "NOTA MANUAL"
+    sheet["A65519"].fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+    before = len(sheet._cells)
+    start = time.monotonic()
+    row = process_emails.nn_next_append_row(sheet)
+    assert_true(row == 6, "La nueva solicitud no iria debajo de los datos existentes")
+    assert_true(len(sheet._cells) == before, "Buscar la siguiente fila creo celdas vacias")
+    assert_true(time.monotonic() - start < 3, "Buscar la siguiente fila tarda demasiado")
+    sheet["AR42"] = "TOTAL"
+    assert_true(process_emails.nn_next_append_row(sheet) == 43,
+                "La nueva solicitud podria sobrescribir una fila de la plantilla")
+
+
 def test_conflict_stops_before_replace() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "original.xlsx"
@@ -466,6 +485,7 @@ def main() -> None:
     test_event_button_handlers_are_valid_javascript()
     test_basic_append()
     test_nn_append()
+    test_sparse_formatted_rows_append_position()
     test_conflict_stops_before_replace()
     test_global_and_event_flow()
     test_supplied_template_when_available()

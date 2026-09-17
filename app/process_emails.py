@@ -50,7 +50,7 @@ EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
-APP_VERSION = "v6"
+APP_VERSION = "v7"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
@@ -1142,21 +1142,18 @@ def nn_existing_row_keys(sheet) -> set[str]:
 def nn_next_append_row(sheet) -> int:
     if sheet.title == "Listado":
         # Las formulas y listas auxiliares ocupan filas que aun no tienen asistentes.
-        for row_num in range(sheet.max_row, 3, -1):
-            if any(
-                cell.data_type != "f"
-                and cell.value is not None
-                and str(cell.value).strip()
-                for row in sheet.iter_rows(min_row=row_num, max_row=row_num, min_col=2, max_col=110)
-                for cell in row
-                if cell.column != 61  # BI contiene ceros de la plantilla.
-            ):
-                return row_num + 1
-        return 4
-    for row_num in range(sheet.max_row, 3, -1):
-        if any(cell.value not in (None, "") for cell in sheet[row_num]):
-            return row_num + 1
-    return 4
+        occupied = (
+            cell.row for cell in sheet._cells.values()
+            if cell.row >= 4 and 2 <= cell.column <= 110 and cell.column != 61
+            and cell.data_type != "f" and cell.value is not None
+            and str(cell.value).strip()
+        )
+        return max(occupied, default=3) + 1
+    occupied = (
+        cell.row for cell in sheet._cells.values()
+        if cell.row >= 4 and cell.value not in (None, "")
+    )
+    return max(occupied, default=3) + 1
 
 
 def write_nn_row(sheet, row_num: int, item: TravelRequest) -> None:
