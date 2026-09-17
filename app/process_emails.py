@@ -50,7 +50,7 @@ EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
-APP_VERSION = "v8"
+APP_VERSION = "v9"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
@@ -1685,6 +1685,20 @@ def test_imap_connection() -> str:
     return user
 
 
+def test_production_imap_connection() -> str:
+    config = {name: mail_env(f"PROD_IMAP_{name}") for name in ("HOST", "PORT", "USER", "PASSWORD", "FOLDER")}
+    missing = [name for name in ("HOST", "USER", "PASSWORD") if not config[name]]
+    if missing:
+        raise ValueError("Faltan datos de produccion: " + ", ".join(f"PROD_IMAP_{name}" for name in missing))
+    mailbox = imaplib.IMAP4_SSL(config["HOST"], int(config["PORT"] or "993"), timeout=10)
+    with mailbox:
+        mailbox.login(config["USER"], config["PASSWORD"])
+        status, _ = mailbox.select(config["FOLDER"] or "INBOX", readonly=True)
+        if status != "OK":
+            raise RuntimeError("No se pudo abrir la carpeta de produccion en modo lectura")
+    return config["USER"]
+
+
 def imap_is_ok() -> bool:
     try:
         with open_imap_mailbox():
@@ -2277,14 +2291,23 @@ def dashboard_html() -> str:
       box-shadow: 0 0 0 4px rgba(246,200,96,.12);
     }}
     .toolbar {{
-      display: grid;
-      grid-template-columns: 220px auto auto auto auto auto 1fr;
+      display: flex;
+      flex-wrap: wrap;
       gap: 14px;
       align-items: center;
       padding: 16px 32px;
       border-bottom: 1px solid var(--line);
       background: rgba(6,16,25,.94);
     }}
+    .mode-switch {{ display: inline-flex; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--panel); }}
+    .mode-switch button {{ border: 0; border-radius: 4px; padding: 8px 12px; background: transparent; color: var(--muted); box-shadow: none; font-size: 14px; }}
+    .mode-switch button[aria-pressed="true"] {{ background: var(--brand-dark); color: var(--brand-soft); }}
+    #status {{ margin-left: auto; }}
+    #productionPanel {{ display: none; padding: 28px 32px; }}
+    #productionPanel h2 {{ margin: 0 0 10px; font-size: 20px; }}
+    #productionPanel p {{ color: var(--muted); max-width: 680px; line-height: 1.5; }}
+    body.production-mode #productionPanel {{ display: block; }}
+    body.production-mode .test-only, body.production-mode main {{ display: none; }}
     .power {{
       min-height: 52px;
       border-radius: 999px;
@@ -2539,7 +2562,7 @@ def dashboard_html() -> str:
     }}
     @media (max-width: 980px) {{
       header {{ align-items: flex-start; flex-direction: column; }}
-      .toolbar {{ grid-template-columns: 1fr; }}
+      .toolbar {{ align-items: stretch; }}
       #status {{ text-align: left; }}
       main {{ grid-template-columns: 1fr; }}
       .cards {{ grid-template-columns: 1fr; }}
@@ -2555,17 +2578,26 @@ def dashboard_html() -> str:
       <span class="app-version">MICE TRAVEL BOT {APP_VERSION}</span>
     </header>
     <div class="toolbar">
-      <button id="powerButton" class="power {'is-on' if bot_active else ''}" onclick="toggleBot()" {'disabled' if not bot_active else ''}>
+      <div class="mode-switch" role="group" aria-label="Entorno">
+        <button id="testMode" aria-pressed="true" onclick="selectMode('test')">Test</button>
+        <button id="productionMode" aria-pressed="false" onclick="selectMode('production')" {'disabled' if bot_active else ''}>Producción</button>
+      </div>
+      <button id="powerButton" class="power test-only {'is-on' if bot_active else ''}" onclick="toggleBot()" {'disabled' if not bot_active else ''}>
         <span class="switch-track"><span class="switch-knob"></span></span>
         <span class="power-text"><strong>{"ON" if bot_active else "OFF"}</strong><span>{"Cada 5 minutos" if bot_active else "Activar bot"}</span></span>
       </button>
       <span class="health" id="imapHealth"><span class="dot checking"></span>IMAP</span>
-      <span class="health"><span class="dot {'ok' if excel_ready else ''}"></span>Excel</span>
-      <button class="health-action" onclick="selectTemplateExcel()">Plantilla</button>
-      <button class="health-action" onclick="selectGlobalExcel()">Excel global</button>
-      <button class="health-action" onclick="openExcel()">Abrir Excel</button>
+      <span class="health test-only"><span class="dot {'ok' if excel_ready else ''}"></span>Excel</span>
+      <button class="health-action test-only" onclick="selectTemplateExcel()">Plantilla</button>
+      <button class="health-action test-only" onclick="selectGlobalExcel()">Excel global</button>
+      <button class="health-action test-only" onclick="openExcel()">Abrir Excel</button>
       <span id="status">Listo.</span>
     </div>
+    <section id="productionPanel" aria-label="Producción">
+      <h2>Correo de producción</h2>
+      <p>Comprobación de acceso en modo lectura. No descarga ni marca correos, y no modifica ningún Excel.</p>
+      <button id="verifyProductionButton" onclick="verifyProductionImap()">Comprobar conexión</button>
+    </section>
     <main>
       <section>
         <div class="cards">
@@ -2605,6 +2637,45 @@ def dashboard_html() -> str:
   </dialog>
   <script>
     let imapReady = false;
+    let selectedMode = 'test';
+    function selectMode(mode) {{
+      if (mode === 'production' && document.getElementById('productionMode').disabled) return;
+      selectedMode = mode;
+      document.body.classList.toggle('production-mode', mode === 'production');
+      document.getElementById('testMode').setAttribute('aria-pressed', String(mode === 'test'));
+      document.getElementById('productionMode').setAttribute('aria-pressed', String(mode === 'production'));
+      document.querySelector('#imapHealth .dot').className = 'dot';
+      if (mode === 'production') {{
+        document.getElementById('status').textContent = 'Producción: solo comprobación de correo.';
+        verifyProductionImap();
+      }} else {{
+        verifyImap();
+      }}
+    }}
+    async function verifyProductionImap() {{
+      const button = document.getElementById('verifyProductionButton');
+      const dot = document.querySelector('#imapHealth .dot');
+      const status = document.getElementById('status');
+      button.disabled = true;
+      dot.className = 'dot checking';
+      status.textContent = 'Comprobando correo de producción en modo lectura...';
+      try {{
+        const response = await fetch('/api/test-production-mail', {{ method: 'POST' }});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pudo conectar.');
+        if (selectedMode === 'production') {{
+          dot.className = 'dot ok';
+          status.textContent = 'Conexión correcta: ' + data.user + '. Sin procesar correos.';
+        }}
+      }} catch (error) {{
+        if (selectedMode === 'production') {{
+          dot.className = 'dot';
+          status.textContent = error.message;
+        }}
+      }} finally {{
+        button.disabled = false;
+      }}
+    }}
     async function verifyImap() {{
       const button = document.getElementById('powerButton');
       const dot = document.querySelector('#imapHealth .dot');
@@ -2616,13 +2687,17 @@ def dashboard_html() -> str:
         const response = await fetch('/api/test-mail', {{ method: 'POST' }});
         if (!response.ok) throw new Error('IMAP no disponible');
         imapReady = true;
-        dot.className = 'dot ok';
-        if (!button.classList.contains('is-on')) button.disabled = false;
-        status.textContent = 'IMAP verificado. Listo.';
+        if (selectedMode === 'test') {{
+          dot.className = 'dot ok';
+          if (!button.classList.contains('is-on')) button.disabled = false;
+          status.textContent = 'IMAP verificado. Listo.';
+        }}
       }} catch (error) {{
         imapReady = false;
-        dot.className = 'dot';
-        status.textContent = 'IMAP no disponible. No se activará el bot.';
+        if (selectedMode === 'test') {{
+          dot.className = 'dot';
+          status.textContent = 'IMAP no disponible. No se activará el bot.';
+        }}
       }}
     }}
     async function callApi(path, message, reload = true) {{
@@ -2637,6 +2712,7 @@ def dashboard_html() -> str:
       if (reload) window.location.reload();
     }}
     async function toggleBot() {{
+      if (selectedMode !== 'test') return;
       const button = document.getElementById('powerButton');
       const isOn = button.classList.contains('is-on');
       if (isOn) {{
@@ -2864,6 +2940,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if self.path == "/api/test-mail":
             user = test_imap_connection()
             self.send_json({"ok": True, "user": user})
+            return
+        if self.path == "/api/test-production-mail":
+            try:
+                user = test_production_imap_connection()
+            except (OSError, ValueError, RuntimeError, imaplib.IMAP4.error) as exc:
+                self.send_json({"error": str(exc)}, status=400)
+                return
+            self.send_json({"ok": True, "user": user, "read_only": True})
             return
         if self.path == "/api/check-mail":
             count = check_unread_mail()

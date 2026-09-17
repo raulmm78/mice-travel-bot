@@ -14,6 +14,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from datetime import date
 from unittest.mock import patch
+from unittest.mock import MagicMock
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.formatting.rule import CellIsRule
@@ -87,6 +88,41 @@ def test_dashboard_checks_imap_before_on() -> None:
     assert_true('id="powerButton"' in html and "disabled" in html, "ON no espera a la comprobacion IMAP")
     assert_true("verifyImap();" in html and f"MICE TRAVEL BOT {process_emails.APP_VERSION}" in html,
                 "Falta la verificacion IMAP del panel")
+    assert_true('id="productionMode"' in html and 'id="productionPanel"' in html,
+                "Falta la comprobacion aislada de produccion")
+    assert_true("if (selectedMode !== 'test') return;" in html,
+                "El boton ON no queda bloqueado al seleccionar produccion")
+
+
+def test_production_imap_is_read_only() -> None:
+    mailbox = MagicMock()
+    mailbox.__enter__.return_value = mailbox
+    mailbox.select.return_value = ("OK", [b"0"])
+    config = {
+        "PROD_IMAP_HOST": "imap.example.com", "PROD_IMAP_PORT": "993",
+        "PROD_IMAP_USER": "production@example.com", "PROD_IMAP_PASSWORD": "dummy-secret",
+        "PROD_IMAP_FOLDER": "INBOX",
+    }
+    with patch.dict(os.environ, config), patch.object(process_emails.imaplib, "IMAP4_SSL", return_value=mailbox) as connect, \
+            patch.object(process_emails, "import_new_mail") as import_mail, \
+            patch.object(process_emails, "process_all") as process, \
+            patch.object(process_emails, "write_outputs") as write:
+        assert_true(process_emails.test_production_imap_connection() == "production@example.com",
+                    "No devolvio la cuenta comprobada")
+        connect.assert_called_once_with("imap.example.com", 993, timeout=10)
+        mailbox.login.assert_called_once_with("production@example.com", "dummy-secret")
+        mailbox.select.assert_called_once_with("INBOX", readonly=True)
+        mailbox.uid.assert_not_called()
+        import_mail.assert_not_called()
+        process.assert_not_called()
+        write.assert_not_called()
+    with patch.dict(os.environ, {"PROD_IMAP_HOST": "", "PROD_IMAP_USER": "", "PROD_IMAP_PASSWORD": ""}):
+        try:
+            process_emails.test_production_imap_connection()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Se conecto sin configuracion de produccion")
 
 
 def test_ignored_event_stays_ignored_without_touching_excels() -> None:
@@ -502,6 +538,7 @@ def main() -> None:
     test_filter()
     test_imap_gate_before_processing()
     test_dashboard_checks_imap_before_on()
+    test_production_imap_is_read_only()
     test_ignored_event_stays_ignored_without_touching_excels()
     test_event_buttons_do_not_reprocess_all_mail()
     test_event_buttons_over_http()
