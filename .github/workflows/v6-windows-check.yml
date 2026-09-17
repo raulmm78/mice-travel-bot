@@ -1,0 +1,104 @@
+name: V6 Windows end-to-end
+
+on:
+  push:
+    branches: [codex/v6-validation]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: python -m pip install -r app/requirements.txt
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          foreach ($path in @("platform/windows/v6/preparar_v6.ps1", "platform/windows/v6/instalar_v6.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "$path`: $($errors | Out-String)" }
+          }
+      - name: Test extraction, buttons and Excel preservation
+        run: python app/safety_test.py
+      - name: Reproduce client update with open panel
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "TEST_BOT"
+          $install = Join-Path $root "MICE Travel Bot_windows_con_claves_20260913/MICE Travel Bot"
+          $update = Join-Path $root "_bot_v6"
+          $app = Join-Path $install "app"
+          New-Item -ItemType Directory -Force -Path $app, $update, (Join-Path $install "config") | Out-Null
+          Copy-Item app/process_emails.py (Join-Path $update "process_emails.py")
+          Copy-Item platform/windows/v6/preparar_v6.ps1 (Join-Path $update "preparar_v6.ps1")
+          Copy-Item platform/windows/v6/instalar_v6.ps1 (Join-Path $update "instalar_v6.ps1")
+          Copy-Item platform/windows/v6/abrir_panel_windows.bat (Join-Path $update "abrir_panel_windows.bat")
+          Set-Content (Join-Path $install "abrir_panel_windows.bat") "@echo off" -Encoding Ascii
+          Set-Content (Join-Path $install "config/.env") "TEST_ONLY=1" -Encoding Ascii
+          @'
+          import json
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, *args):
+                  pass
+              def do_GET(self):
+                  if self.path == "/api/status":
+                      content = json.dumps({"phase": Path("phase.txt").read_text(), "on": False}).encode()
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                  else:
+                      content = b"MICE TRAVEL BOT old"
+                      self.send_response(200)
+                      self.send_header("Content-Type", "text/html")
+                  self.send_header("Content-Length", str(len(content)))
+                  self.end_headers()
+                  self.wfile.write(content)
+
+          ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
+          '@ | Set-Content (Join-Path $app "process_emails.py") -Encoding UTF8
+          Set-Content (Join-Path $install "phase.txt") "Guardando Excel global..." -Encoding Ascii
+          python -m venv --system-site-packages (Join-Path $install ".venv")
+          $python = Join-Path $install ".venv/Scripts/python.exe"
+          $excel = Join-Path $root "NO ENVIAR -----LISTADO PRUEBA.xlsx"
+          python -c "from openpyxl import Workbook; import sys; w=Workbook(); w.active['A1']='NO TOCAR'; w.save(sys.argv[1])" $excel
+          $excelHash = (Get-FileHash $excel).Hash
+          $proc = Start-Process -FilePath $python -ArgumentList @("-u", "app/process_emails.py", "--dashboard") -WorkingDirectory $install -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                $state = Invoke-RestMethod "http://127.0.0.1:8765/api/status" -TimeoutSec 1
+                $ready = $true
+                break
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $ready) { throw "No arranco el panel de prueba" }
+
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v6.ps1")
+            if ($LASTEXITCODE -eq 0) { throw "Cerro el bot mientras guardaba Excel" }
+            if ($proc.HasExited) { throw "Se cerro el proceso durante la fase de guardado" }
+            if ((Get-FileHash $excel).Hash -ne $excelHash) { throw "Modifico el Excel durante el intento fallido" }
+
+            Set-Content (Join-Path $install "phase.txt") "Listo." -Encoding Ascii
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $update "preparar_v6.ps1")
+            if ($LASTEXITCODE -ne 0) { throw "No actualizo el bot cuando estaba libre" }
+            $proc.Refresh()
+            if (-not $proc.HasExited) { throw "Dejo abierto el panel anterior" }
+            if ((Get-FileHash $excel).Hash -ne $excelHash) { throw "Modifico el Excel durante la actualizacion" }
+            if ((Get-Content (Join-Path $install "config/.env") -Raw).Trim() -ne "TEST_ONLY=1") {
+              throw "Modifico la configuracion"
+            }
+            if ((Get-FileHash (Join-Path $app "process_emails.py")).Hash -ne (Get-FileHash (Join-Path $update "process_emails.py")).Hash) {
+              throw "No instalo el codigo v6"
+            }
+            if (-not (Test-Path (Join-Path $install "_bot_backups_code"))) { throw "No guardo copia del codigo anterior" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }

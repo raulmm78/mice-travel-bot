@@ -50,7 +50,7 @@ EVENT_ROUTES_FILENAME = "event_routes.json"
 DEFAULT_NN_TEMPLATE_PATH = Path("/Users/raulmartinez/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/084DBDBC-2ECD-4DB2-BE23-DF294F19A3AB/LISTADO PARA VOLCAR LOS DATOS NN.xlsx")
 SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8765
-APP_VERSION = "v3"
+APP_VERSION = "v6"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
 MANDATORY_FIELDS = ("nombre", "dni", "origen", "destino", "fecha_viaje")
 BOT_ADDED_FONT_COLOR = "0070C0"
@@ -569,7 +569,7 @@ def remember_pending_event(event_name: str, rows: list[TravelRequest]) -> None:
     routes = load_event_routes()
     key = event_key(event_name)
     route = routes.get(key, {})
-    if route.get("excel_path"):
+    if route.get("excel_path") or route.get("status") == "ignored":
         return
     suggested = str(suggested_event_workbook_path(event_name, rows))
     routes[key] = {
@@ -594,13 +594,28 @@ def assign_event_excel(event_name: str, excel_path: Path) -> None:
     log_event(f"Excel asignado para {event_name}: {excel_path}")
 
 
+def ignore_event(event_name: str) -> None:
+    key = event_key(event_name)
+    routes = load_event_routes()
+    if routes.get(key, {}).get("status") == "assigned":
+        raise ValueError("Este evento ya tiene un Excel asignado y no se puede ignorar desde aqui.")
+    routes[key] = {
+        "event_name": event_name,
+        "excel_path": "",
+        "status": "ignored",
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_event_routes(routes)
+    log_event(f"Evento ignorado para futuras solicitudes: {event_name}")
+
+
 def pending_event_routes(rows: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     routes = load_event_routes()
     known_events = sorted({str(row.get("evento", "") or "SIN EVENTO") for row in rows or []}, key=event_key)
     pending: list[dict[str, str]] = []
     for event_name in known_events:
         route = routes.get(event_key(event_name), {})
-        if route.get("status") != "assigned":
+        if route.get("status") not in ("assigned", "ignored"):
             pending.append(
                 {
                     "event_name": event_name,
@@ -1911,6 +1926,8 @@ def process_paths(paths: list[Path], use_openai: bool | None = None) -> list[Tra
         use_openai = bool(os.getenv("OPENAI_API_KEY", "").strip())
     BOT_PHASE = f"Extrayendo datos de {len(paths)} correos..."
     rows = [extract_request_auto(path, use_openai) for path in paths]
+    ignored = {key for key, route in load_event_routes().items() if route.get("status") == "ignored"}
+    rows = [row for row in rows if event_key(row.evento or "SIN EVENTO") not in ignored]
     write_outputs(rows)
     mark_processed_message_ids(rows)
     print(f"Procesados: {len(rows)} emails")
@@ -1962,8 +1979,10 @@ def choose_save_excel_file(title: str, default_name: str) -> Path | None:
             "$d.Filter = 'Excel (*.xlsx)|*.xlsx'; "
             "if ($d.ShowDialog() -eq 'OK') { $d.FileName }"
         )
-        result = subprocess.run(["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True, check=False)
+        result = subprocess.run(["powershell", "-NoProfile", "-Sta", "-Command", command], capture_output=True, text=True, check=False)
         value = result.stdout.strip()
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "No se pudo abrir el selector de Excel")
         return Path(value) if result.returncode == 0 and value else None
 
     return None
@@ -2008,39 +2027,86 @@ def choose_template_excel() -> Path | None:
     return chosen
 
 
-def choose_event_excel(event_name: str) -> Path | None:
-    matching_rows = [row for row in process_all() if event_key(row.evento or "SIN EVENTO") == event_key(event_name)]
-    default_name = event_workbook_filename(event_name, matching_rows)
-    chosen = choose_save_excel_file(f"Elegir Excel para {event_name}", default_name)
+def list_event_excel_files() -> list[str]:
+    root = event_output_root()
+    excluded = {xlsx_path().resolve()}
+    template = nn_template_path()
+    if template:
+        excluded.add(template.resolve())
+    files: list[Path] = []
+    if root.exists():
+        for entry in root.iterdir():
+            if entry.is_file() and entry.suffix.lower() == ".xlsx":
+                files.append(entry)
+            elif entry.is_dir() and not entry.name.startswith("_"):
+                files.extend(path for path in entry.glob("*.xlsx") if path.is_file())
+    return sorted({str(path) for path in files if path.resolve() not in excluded}, key=str.casefold)
+
+
+def event_creation_options(event_name: str) -> dict[str, object]:
+    rows = cached_event_rows(event_name)
+    root = event_output_root()
+    folders = [root]
+    if root.is_dir():
+        folders.extend(entry for entry in root.iterdir() if entry.is_dir() and not entry.name.startswith("_"))
+    return {
+        "folder": str(root),
+        "folders": sorted({str(folder) for folder in folders}, key=str.casefold),
+        "filename": event_workbook_filename(event_name, rows),
+    }
+
+
+def choose_event_excel(event_name: str, selected_path: Path | None = None) -> Path | None:
+    matching_rows = cached_event_rows(event_name)
+    chosen = selected_path
     if not chosen:
         return None
-    if chosen.suffix.lower() != ".xlsx":
-        chosen = chosen.with_suffix(".xlsx")
+    if chosen.suffix.lower() != ".xlsx" or not chosen.is_file():
+        raise ValueError("Elige un Excel .xlsx existente.")
     if chosen.resolve() == xlsx_path().resolve():
         raise ValueError("El Excel del evento no puede ser el Excel global")
     template = nn_template_path()
     if template and chosen.resolve() == template.resolve():
         raise ValueError("La plantilla Excel no puede elegirse como Excel de evento")
+    write_event_excel_rows(event_name, matching_rows, chosen)
     assign_event_excel(event_name, chosen)
-    process_all()
     return chosen
 
 
-def create_event_excel(event_name: str) -> Path:
-    rows = process_all()
-    matching_rows = [row for row in rows if event_key(row.evento or "SIN EVENTO") == event_key(event_name)]
-    if not matching_rows:
-        raise ValueError(f"No hay solicitudes para {event_name}")
-    suggested = suggested_event_workbook_path(event_name, matching_rows)
+def cached_event_rows(event_name: str) -> list[TravelRequest]:
+    rows = [
+        TravelRequest(**{field: row.get(field, "") for field in OUTPUT_FIELDS})
+        for row in rows_as_dicts()
+        if event_key(str(row.get("evento") or "SIN EVENTO")) == event_key(event_name)
+    ]
+    if not rows:
+        raise ValueError(f"No hay solicitudes extraidas para {event_name}")
+    return rows
+
+
+def write_event_excel_rows(event_name: str, rows: list[TravelRequest], path: Path) -> None:
+    template = event_template_path()
+    if not path.exists() and not template:
+        raise ValueError("Falta la plantilla NN de eventos para crear el listado.")
+    if not write_nn_excel(rows, path, event_name, template):
+        write_basic_excel(rows, path, event_name)
+
+
+def create_event_excel(event_name: str, selected_path: Path | None = None) -> Path:
+    matching_rows = cached_event_rows(event_name)
+    suggested = selected_path or suggested_event_workbook_path(event_name, matching_rows)
+    if not suggested.is_absolute() or suggested.suffix.lower() != ".xlsx":
+        raise ValueError("Indica una ruta completa terminada en .xlsx")
+    if not suggested.parent.is_dir():
+        raise ValueError(f"La carpeta no existe: {suggested.parent}")
     if suggested.resolve() == xlsx_path().resolve():
         raise ValueError("El Excel del evento coincide con el global")
-    if suggested.exists():
-        raise ValueError(f"Ya existe {suggested.name}. Usa Elegir Excel para asignarlo.")
     template = event_template_path()
-    if not template:
-        raise ValueError("Falta la plantilla NN de eventos. Instala el ZIP de plantilla antes de crear listados.")
-    if not write_nn_excel(matching_rows, suggested, event_name, template):
-        write_basic_excel(matching_rows, suggested, event_name)
+    if template and suggested.resolve() == template.resolve():
+        raise ValueError("La plantilla no puede usarse como Excel del evento")
+    if suggested.exists():
+        raise ValueError(f"Ya existe {suggested.name}. Usa Elegir Excel para asignarlo; no se ha sobrescrito.")
+    write_event_excel_rows(event_name, matching_rows, suggested)
     assign_event_excel(event_name, suggested)
     return suggested
 
@@ -2049,7 +2115,9 @@ def rows_as_dicts() -> list[dict[str, str]]:
     if not json_path().exists():
         return []
     with json_path().open("r", encoding="utf-8") as f:
-        return json.load(f)
+        rows = json.load(f)
+    ignored = {key for key, route in load_event_routes().items() if route.get("status") == "ignored"}
+    return [row for row in rows if event_key(str(row.get("evento") or "SIN EVENTO")) not in ignored]
 
 
 def dashboard_html() -> str:
@@ -2094,8 +2162,9 @@ def dashboard_html() -> str:
                 <span>{html.escape(item.get('excel_path') or 'Sin Excel asignado')}</span>
               </div>
               <div class="event-actions">
-                <button class="secondary" onclick="assignEventExcel({json.dumps(item['event_name'])})">Elegir Excel</button>
-                <button class="secondary" onclick="createEventExcel({json.dumps(item['event_name'])})">Crear Excel</button>
+                <button class="secondary" onclick='assignEventExcel({html.escape(json.dumps(item['event_name']), quote=True)}, this)'>Elegir Excel</button>
+                <button class="secondary" onclick='createEventExcel({html.escape(json.dumps(item['event_name']), quote=True)}, this)'>Crear Excel</button>
+                <button class="danger" onclick='ignoreEvent({html.escape(json.dumps(item['event_name']), quote=True)}, this)'>Ignorar</button>
               </div>
             </div>
             """
@@ -2284,6 +2353,21 @@ def dashboard_html() -> str:
       color: var(--brand-soft);
       border-color: #154d69;
     }}
+    button.danger {{
+      background: #3b1420;
+      color: #ffd9df;
+      border-color: #b94559;
+      box-shadow: none;
+    }}
+    button.danger:hover {{ background: #61202e; }}
+    .event-feedback {{ display: block; margin-top: 7px; color: #ff9ca9; font-size: 13px; }}
+    .event-feedback.working {{ color: var(--muted); }}
+    .excel-dialog {{ background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; width: min(560px, 94vw); padding: 24px; }}
+    .excel-dialog::backdrop {{ background: rgba(0, 0, 0, .75); }}
+    .excel-dialog select {{ width: 100%; margin: 18px 0; padding: 10px; background: #0b1b29; color: var(--ink); border: 1px solid var(--line); }}
+    .excel-dialog label {{ display: block; margin-top: 14px; color: var(--muted); font-size: 13px; }}
+    .excel-dialog input {{ width: 100%; margin-top: 6px; padding: 10px; background: #0b1b29; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; font: inherit; }}
+    .excel-dialog .actions {{ display: flex; justify-content: flex-end; gap: 8px; }}
     button.ghost {{
       border-color: var(--line);
       color: var(--ink);
@@ -2503,6 +2587,22 @@ def dashboard_html() -> str:
       </aside>
     </main>
   </div>
+  <dialog id="excelDialog" class="excel-dialog">
+    <h2>Elegir Excel del evento</h2>
+    <p id="excelDialogEvent"></p>
+    <select id="excelChoices" aria-label="Excel existente"></select>
+    <div class="actions"><button class="secondary" onclick="document.getElementById('excelDialog').close()">Cancelar</button><button id="confirmExcel" onclick="confirmEventExcel()">Elegir Excel</button></div>
+  </dialog>
+  <dialog id="createExcelDialog" class="excel-dialog">
+    <h2>Crear Excel del evento</h2>
+    <p id="createExcelEvent"></p>
+    <label for="createExcelFolder">Carpeta de destino</label>
+    <input id="createExcelFolder" list="createExcelFolders" autocomplete="off">
+    <datalist id="createExcelFolders"></datalist>
+    <label for="createExcelName">Nombre del archivo</label>
+    <input id="createExcelName" autocomplete="off">
+    <div class="actions"><button class="secondary" onclick="document.getElementById('createExcelDialog').close()">Cancelar</button><button onclick="confirmCreateExcel()">Crear Excel</button></div>
+  </dialog>
   <script>
     let imapReady = false;
     async function verifyImap() {{
@@ -2580,35 +2680,102 @@ def dashboard_html() -> str:
     function selectTemplateExcel() {{
       callApi('/api/select-template-excel', 'Eligiendo plantilla...');
     }}
-    async function assignEventExcel(eventName) {{
-      const status = document.getElementById('status');
-      status.textContent = 'Eligiendo Excel para ' + eventName + '...';
-      const response = await fetch('/api/assign-event-excel', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ event_name: eventName }})
-      }});
-      if (!response.ok) {{
-        const data = await response.json().catch(() => ({{}}));
-        status.textContent = data.error || 'No se pudo asignar el Excel.';
-        return;
+    let selectedEvent = null;
+    let selectedButton = null;
+    function eventFeedback(button, message, working = false) {{
+      const container = button.closest('.pending-event').querySelector('div');
+      let feedback = container.querySelector('.event-feedback');
+      if (!feedback) {{
+        feedback = document.createElement('span');
+        feedback.className = 'event-feedback';
+        container.appendChild(feedback);
       }}
-      window.location.reload();
+      feedback.textContent = message;
+      feedback.classList.toggle('working', working);
     }}
-    async function createEventExcel(eventName) {{
-      const status = document.getElementById('status');
-      status.textContent = 'Creando Excel para ' + eventName + '...';
-      const response = await fetch('/api/create-event-excel', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ event_name: eventName }})
-      }});
-      const data = await response.json().catch(() => ({{}}));
-      if (!response.ok) {{
-        status.textContent = data.error || 'No se pudo crear el Excel.';
-        return;
+    async function postEvent(path, eventName, button, extra = {{}}) {{
+      button.disabled = true;
+      eventFeedback(button, 'Guardando...', true);
+      try {{
+        const response = await fetch(path, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ event_name: eventName, ...extra }})
+        }});
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) throw new Error(data.error || 'No se pudo guardar el evento.');
+        window.location.reload();
+      }} catch (error) {{
+        eventFeedback(button, error.message || 'No se pudo conectar con el bot.');
+        button.disabled = false;
       }}
-      window.location.reload();
+    }}
+    async function assignEventExcel(eventName, button) {{
+      selectedEvent = eventName;
+      selectedButton = button;
+      eventFeedback(button, 'Buscando Excel...', true);
+      try {{
+        const response = await fetch('/api/event-excels');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pueden listar los Excel.');
+        const choices = document.getElementById('excelChoices');
+        choices.replaceChildren();
+        for (const path of data.files) {{
+          const option = document.createElement('option');
+          option.value = path;
+          option.textContent = path;
+          choices.appendChild(option);
+        }}
+        if (!data.files.length) throw new Error('No hay Excel .xlsx en la carpeta de eventos.');
+        document.getElementById('excelDialogEvent').textContent = eventName;
+        eventFeedback(button, '');
+        document.getElementById('excelDialog').showModal();
+      }} catch (error) {{
+        eventFeedback(button, error.message || 'No se pudo abrir la lista de Excel.');
+      }}
+    }}
+    function confirmEventExcel() {{
+      const path = document.getElementById('excelChoices').value;
+      document.getElementById('excelDialog').close();
+      if (path && selectedEvent && selectedButton) {{
+        postEvent('/api/assign-event-excel', selectedEvent, selectedButton, {{ excel_path: path }});
+      }}
+    }}
+    async function createEventExcel(eventName, button) {{
+      selectedEvent = eventName;
+      selectedButton = button;
+      eventFeedback(button, 'Preparando destino...', true);
+      try {{
+        const response = await fetch('/api/create-event-options?event_name=' + encodeURIComponent(eventName));
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pudo preparar el Excel.');
+        document.getElementById('createExcelEvent').textContent = eventName;
+        document.getElementById('createExcelFolder').value = data.folder;
+        document.getElementById('createExcelName').value = data.filename;
+        const choices = document.getElementById('createExcelFolders');
+        choices.replaceChildren();
+        for (const folder of data.folders) {{
+          const option = document.createElement('option');
+          option.value = folder;
+          choices.appendChild(option);
+        }}
+        eventFeedback(button, '');
+        document.getElementById('createExcelDialog').showModal();
+      }} catch (error) {{
+        eventFeedback(button, error.message || 'No se pudo preparar el destino.');
+      }}
+    }}
+    function confirmCreateExcel() {{
+      const folder = document.getElementById('createExcelFolder').value.trim();
+      const filename = document.getElementById('createExcelName').value.trim();
+      document.getElementById('createExcelDialog').close();
+      if (selectedEvent && selectedButton) {{
+        postEvent('/api/create-event-excel', selectedEvent, selectedButton, {{ folder, filename }});
+      }}
+    }}
+    async function ignoreEvent(eventName, button) {{
+      if (!confirm('¿Ignorar ' + eventName + ' y todas sus futuras solicitudes? No se borrará ningún Excel existente.')) return;
+      postEvent('/api/ignore-event', eventName, button);
     }}
     verifyImap();
   </script>
@@ -2634,6 +2801,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/api/status":
             self.send_json({"phase": BOT_PHASE, "on": bot_is_active()})
+            return
+        if self.path.startswith("/api/create-event-options?"):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            event_name = (query.get("event_name") or [""])[0].strip()
+            if not event_name:
+                self.send_json({"error": "Falta el nombre del evento"}, status=400)
+                return
+            try:
+                self.send_json(event_creation_options(event_name))
+            except (ValueError, OSError) as exc:
+                self.send_json({"error": str(exc)}, status=400)
+            return
+        if self.path == "/api/event-excels":
+            try:
+                self.send_json({"files": list_event_excel_files()})
+            except OSError as exc:
+                self.send_json({"error": str(exc)}, status=500)
             return
         if self.path == "/":
             self.send_bytes(dashboard_html().encode("utf-8"), "text/html; charset=utf-8")
@@ -2730,7 +2914,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not event_name:
                 self.send_json({"error": "Falta el nombre del evento"}, status=400)
                 return
-            chosen = choose_event_excel(event_name)
+            excel_path = str(data.get("excel_path", "") or "").strip()
+            if not excel_path:
+                self.send_json({"error": "Elige un Excel existente"}, status=400)
+                return
+            try:
+                chosen = choose_event_excel(event_name, Path(excel_path))
+            except (ValueError, OSError, RuntimeError) as exc:
+                self.send_json({"error": str(exc)}, status=400)
+                return
             self.send_json({"event_name": event_name, "selected": str(chosen) if chosen else ""})
             return
         if self.path == "/api/create-event-excel":
@@ -2739,12 +2931,30 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not event_name:
                 self.send_json({"error": "Falta el nombre del evento"}, status=400)
                 return
+            folder = str(data.get("folder", "") or "").strip()
+            filename = str(data.get("filename", "") or "").strip()
+            if not folder or not filename or Path(filename).name != filename:
+                self.send_json({"error": "Indica una carpeta y un nombre de archivo validos"}, status=400)
+                return
             try:
-                created = create_event_excel(event_name)
-            except (ValueError, OSError) as exc:
+                created = create_event_excel(event_name, Path(folder) / filename)
+            except (ValueError, OSError, RuntimeError) as exc:
                 self.send_json({"error": str(exc)}, status=400)
                 return
             self.send_json({"event_name": event_name, "created": str(created)})
+            return
+        if self.path == "/api/ignore-event":
+            data = self.read_json_body()
+            event_name = str(data.get("event_name", "") or "").strip()
+            if not event_name:
+                self.send_json({"error": "Falta el nombre del evento"}, status=400)
+                return
+            try:
+                ignore_event(event_name)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, status=400)
+                return
+            self.send_json({"event_name": event_name, "ignored": True})
             return
         self.send_json({"error": "not_found"}, status=404)
 

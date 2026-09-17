@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
+import subprocess
 import tempfile
+import threading
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from html.parser import HTMLParser
 from pathlib import Path
 from datetime import date
 from unittest.mock import patch
@@ -76,7 +84,158 @@ def test_dashboard_checks_imap_before_on() -> None:
                 with patch.object(process_emails, "pending_event_routes", return_value=[]):
                     html = process_emails.dashboard_html()
     assert_true('id="powerButton"' in html and "disabled" in html, "ON no espera a la comprobacion IMAP")
-    assert_true("verifyImap();" in html and "MICE TRAVEL BOT v3" in html, "Falta la verificacion IMAP de v3")
+    assert_true("verifyImap();" in html and "MICE TRAVEL BOT v6" in html, "Falta la verificacion IMAP de v6")
+
+
+def test_ignored_event_stays_ignored_without_touching_excels() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        global_path = root / "global.xlsx"
+        routes_path = root / "event_routes.json"
+        old = request("EXISTENTE", "11111111H", "old")
+        old.evento = "Congreso ADA"
+        write_basic_excel([old], global_path, "GLOBAL")
+        original = global_path.read_bytes()
+        with patch.dict(os.environ, {"EVENT_ROUTES_PATH": str(routes_path)}):
+            process_emails.ignore_event("Congreso ÁDA")
+            process_emails.remember_pending_event("CONGRESO ADA", [old])
+            route = process_emails.load_event_routes()["CONGRESO ADA"]
+            assert_true(route["status"] == "ignored", "El evento se reactivo al procesar nuevos correos")
+            assert_true(not process_emails.pending_event_routes([{"evento": "Congreso ADA"}]),
+                        "El evento ignorado sigue pendiente en el panel")
+            with patch.object(process_emails, "extract_request_auto", return_value=old):
+                with patch.object(process_emails, "write_outputs") as write:
+                    with patch.object(process_emails, "mark_processed_message_ids"):
+                        rows = process_emails.process_paths([root / "mail.txt"], use_openai=False)
+                        assert_true(rows == [], "El evento ignorado llego al volcado")
+                        write.assert_called_once_with([])
+        assert_true(global_path.read_bytes() == original, "Ignorar ha modificado el Excel existente")
+
+
+def test_event_buttons_do_not_reprocess_all_mail() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        new_path = root / "event.xlsx"
+        sample = request("NUEVO", "22222222J")
+        with patch.object(process_emails, "rows_as_dicts", return_value=[sample.__dict__]):
+            with patch.object(process_emails, "process_all", side_effect=AssertionError("Reproceso inesperado")):
+                with patch.object(process_emails, "suggested_event_workbook_path", return_value=new_path):
+                    with patch.object(process_emails, "write_event_excel_rows") as write:
+                        with patch.object(process_emails, "assign_event_excel") as assign:
+                            assert_true(process_emails.create_event_excel("Congreso IMS") == new_path,
+                                        "Crear Excel no devolvio la ruta del evento")
+                            write.assert_called_once()
+                            assign.assert_called_once()
+                new_path.touch()
+                with patch.object(process_emails, "write_event_excel_rows") as write:
+                    with patch.object(process_emails, "assign_event_excel") as assign:
+                        assert_true(process_emails.choose_event_excel("Congreso IMS", new_path) == new_path,
+                                    "Elegir Excel no devolvio la ruta del evento")
+                        write.assert_called_once()
+                        assign.assert_called_once()
+
+
+def test_event_buttons_over_http() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        destination = root / "destino"
+        destination.mkdir()
+        global_path = root / "global.xlsx"
+        global_path.write_bytes(b"GLOBAL SIN CAMBIOS")
+        first = request("ANA", "11111111H", "first")
+        first.evento = "Congreso ADA"
+        second = request("LUIS", "22222222J", "second")
+        second.evento = "Congreso EASD"
+        environment = patch.dict(os.environ, {"EVENT_ROUTES_PATH": str(root / "routes.json")})
+        with environment, patch.object(process_emails, "rows_as_dicts", return_value=[first.__dict__, second.__dict__]), \
+                patch.object(process_emails, "event_output_root", return_value=root), \
+                patch.object(process_emails, "xlsx_path", return_value=global_path):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), process_emails.DashboardHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            def send(path: str, data: dict[str, str]) -> tuple[int, dict]:
+                req = urllib.request.Request(
+                    base + path, data=json.dumps(data).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                try:
+                    response = urllib.request.urlopen(req, timeout=10)
+                except urllib.error.HTTPError as exc:
+                    response = exc
+                with response:
+                    return response.status, json.load(response)
+            try:
+                with urllib.request.urlopen(base + "/api/create-event-options?event_name=Congreso%20ADA", timeout=10) as response:
+                    proposal = json.load(response)
+                assert_true(proposal["filename"].endswith(".xlsx"), "Falta nombre propuesto")
+                status, created = send("/api/create-event-excel", {
+                    "event_name": "Congreso ADA", "folder": str(destination), "filename": proposal["filename"],
+                })
+                assert_true(status == 200, f"Crear Excel fallo: {created}")
+                created_path = Path(created["created"])
+                assert_true(created_path.parent == destination and created_path.exists(),
+                            "Crear Excel no respeto la carpeta elegida")
+                status, duplicate = send("/api/create-event-excel", {
+                    "event_name": "Congreso ADA", "folder": str(destination), "filename": proposal["filename"],
+                })
+                assert_true(status == 400 and "no se ha sobrescrito" in duplicate["error"],
+                            "Crear Excel permite sobrescribir un archivo existente")
+                with urllib.request.urlopen(base + "/api/event-excels", timeout=10) as response:
+                    files = json.load(response)["files"]
+                assert_true(str(created_path) in files, "Elegir Excel no muestra el Excel creado")
+                status, assigned = send("/api/assign-event-excel", {
+                    "event_name": "Congreso EASD", "excel_path": str(created_path),
+                })
+                assert_true(status == 200, f"Elegir Excel fallo: {assigned}")
+                sheet = load_workbook(created_path)["Listado"]
+                assert_true(sheet["O4"].value == "11111111H" and sheet["O5"].value == "22222222J",
+                            "Elegir Excel no anadio la fila debajo de la existente")
+                status, error = send("/api/assign-event-excel", {
+                    "event_name": "Congreso EASD", "excel_path": str(root / "no_existe.xlsx"),
+                })
+                assert_true(status == 400 and "error" in error, "No comunica un Excel inexistente")
+                assert_true(global_path.read_bytes() == b"GLOBAL SIN CAMBIOS", "Los botones modificaron el global")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+
+def test_event_javascript_syntax() -> None:
+    if not shutil.which("node"):
+        return
+    with patch.object(process_emails, "rows_as_dicts", return_value=[]):
+        page = process_emails.dashboard_html()
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    result = subprocess.run(["node", "--check"], input=script, text=True, capture_output=True)
+    assert_true(result.returncode == 0, f"Error JavaScript del panel: {result.stderr}")
+
+
+def test_event_button_handlers_are_valid_javascript() -> None:
+    class Buttons(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.handlers: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag == "button":
+                handler = dict(attrs).get("onclick")
+                if handler and "Event" in handler:
+                    self.handlers.append(handler)
+
+    sample = request("TEST", "12345678Z")
+    sample.evento = "Reunion d'Alvarez"
+    with patch.object(process_emails, "rows_as_dicts", return_value=[sample.__dict__]):
+        with patch.object(process_emails, "recent_logs", return_value=[]):
+            page = process_emails.dashboard_html()
+    parser = Buttons()
+    parser.feed(page)
+    assert_true(len(parser.handlers) >= 3, "No aparecen los tres botones del evento")
+    if shutil.which("node"):
+        for handler in parser.handlers:
+            result = subprocess.run(["node", "--check"], input=handler, text=True, capture_output=True)
+            assert_true(result.returncode == 0, f"Boton con JavaScript roto: {handler}")
 
 
 def test_basic_append() -> None:
@@ -286,6 +445,11 @@ def main() -> None:
     test_filter()
     test_imap_gate_before_processing()
     test_dashboard_checks_imap_before_on()
+    test_ignored_event_stays_ignored_without_touching_excels()
+    test_event_buttons_do_not_reprocess_all_mail()
+    test_event_buttons_over_http()
+    test_event_javascript_syntax()
+    test_event_button_handlers_are_valid_javascript()
     test_basic_append()
     test_nn_append()
     test_conflict_stops_before_replace()
